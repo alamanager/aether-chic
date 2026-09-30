@@ -5,6 +5,7 @@ mod commands;
 mod error;
 mod events;
 mod focus;
+mod http_proxy;
 mod state;
 mod sysproxy;
 mod tray;
@@ -38,6 +39,7 @@ fn main() {
             commands::set_close_to_tray,
             commands::get_system_proxy,
             commands::set_system_proxy,
+            commands::get_http_proxy,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

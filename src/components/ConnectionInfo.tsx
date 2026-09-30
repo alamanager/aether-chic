@@ -62,11 +62,10 @@ function Row({
 }
 
 /**
- * Shown while Connected: local SOCKS endpoint, the visible public IP
- * (fetched through the tunnel when System Proxy is on), and the
- * System Proxy switch. The switch calls the backend `set_system_proxy`
- * command; if the backend predates that command the error is surfaced
- * as a hint instead of failing silently.
+ * Shown while Connected: local SOCKS endpoint, the separate HTTP endpoint
+ * (bridge port = SOCKS port + 1, for consumers that only speak HTTP proxy),
+ * the visible public IP, and the System Proxy switch (points Windows at the
+ * HTTP endpoint, v2rayN-style). Errors surface as hints, never silently.
  * ponytail: public-IP lookup is a plain api.ipify.org fetch — swap for a
  * backend SOCKS-aware check if it ever proves unreliable.
  */
@@ -74,6 +73,7 @@ export function ConnectionInfo() {
   const status = useConnectionStore((s) => s.status);
   const [publicIp, setPublicIp] = useState<string | null>(null);
   const [ipLoading, setIpLoading] = useState(false);
+  const [httpAddr, setHttpAddr] = useState<string | null>(null);
   const [sysProxy, setSysProxy] = useState<boolean | null>(null);
   const [proxyBusy, setProxyBusy] = useState(false);
   const [proxyHint, setProxyHint] = useState<string | null>(null);
@@ -105,11 +105,15 @@ export function ConnectionInfo() {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (connected) {
       void fetchIp();
+      invoke<string | null>("get_http_proxy")
+        .then((a) => setHttpAddr(a))
+        .catch(() => setHttpAddr(null));
       invoke<boolean>("get_system_proxy")
         .then(setSysProxy)
         .catch(() => setSysProxy(null));
     } else {
       setPublicIp(null);
+      setHttpAddr(null);
       setSysProxy(null);
       setProxyHint(null);
     }
@@ -126,17 +130,21 @@ export function ConnectionInfo() {
   };
 
   const toggleSysProxy = async (on: boolean) => {
+    if (on && !httpAddr) {
+      setProxyHint("HTTP bridge isn't running — check the logs in Advanced.");
+      return;
+    }
     setProxyBusy(true);
     setProxyHint(null);
     try {
-      await invoke("set_system_proxy", { enabled: on, server: socksAddr });
+      await invoke("set_system_proxy", { enabled: on, server: on ? httpAddr : socksAddr });
       setSysProxy(on);
     } catch (e) {
       // Backend without the sysproxy module (or a non-Windows target):
       // leave the switch off and explain the manual path.
       setSysProxy(false);
       setProxyHint(
-        `Auto-switch unavailable (${String(e).slice(0, 90)}). Set it manually: Windows Settings → Proxy → ${socksAddr}`,
+        `Auto-switch unavailable (${String(e).slice(0, 90)}). Set it manually: Windows Settings → Proxy → ${httpAddr ?? socksAddr}`,
       );
     } finally {
       setProxyBusy(false);
@@ -151,6 +159,13 @@ export function ConnectionInfo() {
         value={socksAddr}
         onCopy={() => void doCopy("socks", socksAddr)}
         copied={copied === "socks"}
+      />
+      <Row
+        icon={<Server className="size-4" />}
+        label="HTTP proxy"
+        value={httpAddr ?? "starting…"}
+        onCopy={httpAddr ? () => void doCopy("http", httpAddr) : undefined}
+        copied={copied === "http"}
       />
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
@@ -176,7 +191,7 @@ export function ConnectionInfo() {
           <MonitorUp className="size-4" />
           System proxy
           <span className="hidden font-mono text-[10px] opacity-70 sm:inline" dir="ltr">
-            {socksAddr}
+            {httpAddr ?? socksAddr}
           </span>
         </span>
         <Switch
@@ -189,7 +204,8 @@ export function ConnectionInfo() {
       {proxyHint && <p className="px-1 text-[11px] leading-5 text-muted-foreground">{proxyHint}</p>}
       {!proxyHint && sysProxy === null && (
         <p className="px-1 text-[11px] leading-5 text-muted-foreground">
-          Copy the SOCKS5 address into your app, or flip System proxy to route Windows through it.
+          Flip System proxy to route Windows (HTTP) through the tunnel, or copy an address into
+          apps that take SOCKS5 / HTTP manually.
         </p>
       )}
     </div>

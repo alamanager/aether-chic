@@ -1,18 +1,15 @@
-//! Windows system-proxy switch for the tunnel's SOCKS5 endpoint.
+//! Windows system-proxy switch for the tunnel's HTTP endpoint.
 //!
 //! Mechanism mirrors v2rayN's ProxySettingWindows (the working reference,
-//! read in full): a per-protocol `ProxyServer` value + `ProxyOverride`
-//! bypass list under HKCU\...\Internet Settings, activated with WinInet
+//! read in full): a `ProxyServer` value + `ProxyOverride` bypass list under
+//! HKCU\...\Internet Settings, activated with WinInet
 //! `INTERNET_OPTION_SETTINGS_CHANGED` + `INTERNET_OPTION_REFRESH`.
 //!
-//! Two details that broke the first version of this module:
-//!  1. A bare "host:port" ProxyServer means HTTP proxy for ALL protocols —
-//!     browsers then speak plain HTTP to our SOCKS5 port and everything
-//!     fails. A SOCKS-only endpoint MUST be written as "socks=host:port".
-//!     (v2rayN gets away with the bare form because it also runs an HTTP
-//!     inbound; we only have SOCKS5, so the prefix is mandatory.)
-//!  2. A WM_SETTINGCHANGE broadcast does NOT refresh WinInet's cached proxy
-//!     config — only InternetSetOption(SETTINGS_CHANGED)+REFRESH does.
+//! The server handed here is the local HTTP→SOCKS bridge (see http_proxy),
+//! so the value is written bare ("host:port") — Windows treats that as an
+//! HTTP proxy for all protocols, which is exactly right for an HTTP
+//! endpoint. (A SOCKS-only endpoint would need a "socks=" prefix instead;
+//! that's why the bare form failed before the bridge existed.)
 //! ponytail: disabling wipes ProxyServer/Override instead of restoring
 //! whatever was there before — same as v2rayN's fallback. Snapshot/restore
 //! only if a user ever complains.
@@ -100,12 +97,10 @@ pub fn set(enabled: bool, server: &str) -> Result<(), String> {
             if server.is_empty() {
                 return Err("proxy server address is empty".into());
             }
-            // The "socks=" prefix is MANDATORY for a SOCKS-only endpoint —
-            // a bare host:port would be treated as an HTTP proxy (see docs).
-            let proxy = format!("socks={server}");
+            // Bare "host:port" = HTTP proxy for all protocols — correct
+            // here because `server` is the HTTP bridge, not raw SOCKS.
             reg(&[
-                "add", REG_PATH, "/v", "ProxyServer", "/t", "REG_SZ", "/d", proxy.as_str(),
-                "/f",
+                "add", REG_PATH, "/v", "ProxyServer", "/t", "REG_SZ", "/d", server, "/f",
             ])?;
             reg(&[
                 "add", REG_PATH, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", "<local>",
