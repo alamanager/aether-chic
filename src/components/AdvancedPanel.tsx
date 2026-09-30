@@ -47,6 +47,34 @@ function FieldRow({
 }
 
 /**
+ * Skips Tor's ~75s direct attempt and goes straight to bridges. Only
+ * enabled with a Tor mode selected above (the backend gates the flag the
+ * same way) — on a network that blocks Tor outright, direct is futile:
+ * observed stuck at 15% fetching consensus.
+ */
+function TorBridgesRow() {
+  const status = useConnectionStore((s) => s.status);
+  const extra = useConnectionStore((s) => s.profile.extra_transport);
+  const torBridges = useConnectionStore((s) => s.profile.tor_bridges);
+  const setTorBridges = useConnectionStore((s) => s.setTorBridges);
+
+  const locked = status.state !== "Idle" && status.state !== "Error";
+  const isTor = extra === "tor" || extra === "tor_reverse" || extra === "tor_only";
+
+  return (
+    <div className="flex items-center justify-between pt-1">
+      <span className="text-xs text-muted-foreground">Tor: straight to bridges</span>
+      <Switch
+        checked={torBridges}
+        onCheckedChange={setTorBridges}
+        disabled={locked || !isTor}
+        aria-label="Skip Tor direct attempt, use bridges immediately"
+      />
+    </div>
+  );
+}
+
+/**
  * Collapsed by default — this *is* the auto-mode default: press Connect,
  * done. Everything configurable (the options Aether's own interactive setup
  * exposes — see aether/prompts.rs and profiles.rs, nothing else) plus the
@@ -56,8 +84,7 @@ function FieldRow({
  * spring, a 300ms tw-animate slide, an instant column reflow, and three
  * Glass filter mounts — four systems fighting read as jank. Now it's one
  * fast CSS fade/slide and nothing else.
- */
-export function AdvancedPanel() {
+ */export function AdvancedPanel() {
   const logs = useConnectionStore((s) => s.logs);
   const status = useConnectionStore((s) => s.status);
   const quickReconnect = useConnectionStore((s) => s.profile.quick_reconnect);
@@ -132,6 +159,7 @@ export function AdvancedPanel() {
               tooltip="Built-in Tor or Psiphon from core v2.x — either carried inside the tunnel, used to reach the tunnel, or on its own. Needs the pt/ transports bundled with the app."
             >
               <ExtraTransportSelect />
+              <TorBridgesRow />
             </FieldRow>
             <FieldRow
               label="Zero Trust (organization)"

@@ -59,6 +59,8 @@ export interface ConnectionProfile {
   upstream: string;
   /** Aether ≥2.0/2.1: built-in Tor / Psiphon transports (needs core's pt/). */
   extra_transport: ExtraTransport;
+  /** Skip Tor's direct attempt, go straight to bridges. */
+  tor_bridges: boolean;
   route_direct: string;
   routes_file: string;
 }

@@ -7,7 +7,7 @@ pub mod status;
 use crate::error::AetherError;
 use crate::events::{now_millis, LogEvent, LOG_EVENT, STATUS_EVENT};
 use crate::state::ConnectionState;
-use profiles::ConnectionProfile;
+use profiles::{ConnectionProfile, ExtraTransport};
 use pty::PtySession;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -324,6 +324,63 @@ fn monitor_connect(
         }
 
         if status::port_is_live(&socks) {
+            // Tor/Psiphon modes bind the local ports long before the exit is
+            // usable (observed: Tor stuck at 15% fetching consensus, Psiphon
+            // ~6s behind). Confirm real traffic flows before calling it
+            // Connected — the probe sleeps, so the lock must go first.
+            let http: std::net::SocketAddr = profiles::http_proxy_addr(&profile.bind_address)
+                .parse()
+                .unwrap_or_else(|_| {
+                    "127.0.0.1:1820"
+                        .parse()
+                        .expect("loopback literal always parses")
+                });
+            let needs_probe = profile.extra_transport != ExtraTransport::None;
+            drop(mgr);
+            if needs_probe
+                && !status::wait_until_usable(
+                    &http,
+                    Instant::now() + status::EXTRA_TRANSPORT_TIMEOUT,
+                )
+            {
+                let mut mgr = manager.lock().unwrap();
+                if mgr.user_requested_stop {
+                    return;
+                }
+                if let Some(session) = mgr.session.as_mut() {
+                    session.kill();
+                }
+                mgr.session = None;
+                drop(mgr);
+                handle_unexpected_failure(
+                    app,
+                    manager,
+                    binary,
+                    data_dir,
+                    profile,
+                    "Timed out waiting for Tor/Psiphon to become usable".into(),
+                    "connecting",
+                );
+                return;
+            }
+            let mut mgr = manager.lock().unwrap();
+            if mgr.user_requested_stop {
+                return;
+            }
+            if let Some(exit) = mgr.session.as_mut().and_then(|s| s.try_wait()) {
+                mgr.session = None;
+                drop(mgr);
+                handle_unexpected_failure(
+                    app,
+                    manager,
+                    binary,
+                    data_dir,
+                    profile,
+                    format!("Aether exited before connecting ({exit})"),
+                    "connecting",
+                );
+                return;
+            }
             let new_state = ConnectionState::Connected {
                 socks_addr: profile.bind_address.clone(),
                 connected_at_ms: now_millis(),
@@ -334,13 +391,13 @@ fn monitor_connect(
             mgr.retry_count = 0;
             // The core serves its native HTTP proxy on SOCKS port + 1 (see
             // profiles::http_proxy_addr) — remember it for get_http_proxy.
-            let http = profiles::http_proxy_addr(&profile.bind_address);
-            mgr.http_proxy_addr = Some(http.clone());
+            let http_str = http.to_string();
+            mgr.http_proxy_addr = Some(http_str.clone());
             drop(mgr);
             let _ = app.emit(
                 LOG_EVENT,
                 &LogEvent {
-                    line: format!("[gui] HTTP proxy on {http} (SOCKS {socks})"),
+                    line: format!("[gui] HTTP proxy on {http_str} (SOCKS {socks})"),
                     timestamp: now_millis(),
                 },
             );

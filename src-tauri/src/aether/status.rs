@@ -1,6 +1,7 @@
 use super::profiles::ScanMode;
+use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_SOCKS_ADDR: &str = "127.0.0.1:1819";
 
@@ -43,6 +44,63 @@ pub fn connect_timeout(scan_mode: &ScanMode) -> Duration {
     })
 }
 
+/// Backstop for the extra-transport usability probe below. Tor/Psiphon bind
+/// the local ports minutes before the exit is usable (Tor: 75s plain attempt
+/// + bridge fetch + directory download — see AETHER_TOR_DIRECT_SECS,
+/// AETHER_TOR_STALL_SECS, AETHER_TOR_BRIDGE_SECS), so this is far longer
+/// than any scan-mode timeout.
+pub const EXTRA_TRANSPORT_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// One plain-HTTP fetch of api.ipify.org through the local HTTP proxy.
+/// Proves the tunnel carries real traffic, not just an open port. std only;
+/// hostnames stay in the absolute-URI form so the proxy resolves them.
+fn probe_once(http: &SocketAddr) -> bool {
+    let mut s = match TcpStream::connect_timeout(http, Duration::from_secs(5)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if s.set_read_timeout(Some(Duration::from_secs(15))).is_err() {
+        return false;
+    }
+    if s.write_all(
+        b"GET http://api.ipify.org/?format=json HTTP/1.0\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n",
+    )
+    .is_err()
+    {
+        return false;
+    }
+    let mut buf = [0u8; 4096];
+    let mut total = 0;
+    loop {
+        match s.read(&mut buf[total..]) {
+            Ok(0) => break,
+            Ok(n) => {
+                total += n;
+                if total >= buf.len() {
+                    break;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+    let head = String::from_utf8_lossy(&buf[..total]);
+    head.starts_with("HTTP/") && head.contains(" 200 ")
+}
+
+/// Blocks until the tunnel carries traffic or `deadline` passes. Only used
+/// for Tor/Psiphon modes, where an open SOCKS port predates a usable exit
+/// by seconds (Psiphon) to many minutes (Tor bootstrap on filtered nets).
+pub fn wait_until_usable(http: &SocketAddr, deadline: Instant) -> bool {
+    loop {
+        if probe_once(http) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
 /// How long to wait after sending Ctrl-C before force-killing. Manually
 /// testing shutdown against the real binary showed it does NOT exit quickly
 /// on SIGINT (still alive 10+ seconds later) — but since v1 never elevates

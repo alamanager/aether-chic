@@ -181,6 +181,11 @@ pub struct ConnectionProfile {    pub protocol: Protocol,
     /// single enum rather than independent toggles that could combine badly.
     #[serde(default)]
     pub extra_transport: ExtraTransport,
+    /// Skip Tor's plain attempt and go straight to bridges (core tries ~75s
+    /// of direct first, which is futile on a network that blocks Tor —
+    /// observed stuck fetching consensus). Only forwarded with a Tor mode.
+    #[serde(default)]
+    pub tor_bridges: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -309,6 +314,16 @@ impl ConnectionProfile {
         }
         if let Some(flag) = self.extra_transport.as_flag() {
             args.push(flag.into());
+        }
+        // Gated on a Tor mode: without one the flag is meaningless and the
+        // core might reject it.
+        if self.tor_bridges
+            && matches!(
+                self.extra_transport,
+                ExtraTransport::Tor | ExtraTransport::TorReverse | ExtraTransport::TorOnly
+            )
+        {
+            args.push("--tor-bridges".into());
         }
         if !self.dns.trim().is_empty() {
             args.push("--dns".into());
@@ -507,6 +522,18 @@ mod tests {
     }
 
     #[test]
+    fn tor_bridges_only_with_tor_mode() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::TorOnly;
+        p.tor_bridges = true;
+        let args = p.as_args();
+        assert!(args.iter().any(|a| a == "--tor-bridges"));
+        p.extra_transport = ExtraTransport::PsiphonOnly;
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--tor-bridges"));
+    }
+
+    #[test]
     fn zero_trust_email_is_provided_as_an_environment_value() {        let p = ConnectionProfile {
             zero_trust_team: "acme".into(),
             access_email: "me@example.com".into(),
@@ -545,6 +572,7 @@ impl Default for ConnectionProfile {
             routes_file: String::new(),
             upstream: String::new(),
             extra_transport: ExtraTransport::None,
+            tor_bridges: false,
         }
     }
 }

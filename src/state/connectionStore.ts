@@ -48,6 +48,7 @@ interface ConnectionState {
   setRoutesFile: (routes_file: string) => void;
   setUpstream: (upstream: string) => void;
   setExtraTransport: (extra_transport: ExtraTransport) => void;
+  setTorBridges: (tor_bridges: boolean) => void;
   retryAfterSidecarError: () => void;
 }
 
@@ -75,6 +76,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     routes_file: "",
     upstream: "",
     extra_transport: "none",
+    tor_bridges: false,
   },
   logs: [],
   sidecarError: null,
@@ -180,6 +182,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   setExtraTransport: (extra_transport) =>
     set((s) => ({ profile: { ...s.profile, extra_transport } })),
+
+  setTorBridges: (tor_bridges) =>
+    set((s) => ({ profile: { ...s.profile, tor_bridges } })),
 
   // Clears the fallback screen so the user can attempt Connect again (e.g.
   // after fixing a broken install) — the next connect() call will re-set
