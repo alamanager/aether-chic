@@ -34,8 +34,8 @@ const TABS: { id: Tab; label: string; icon: typeof House }[] = [
 function HomeTab() {
   const attemptId = useConnectionStore((s) => s.attemptId);
   return (
-    <div className="flex flex-col items-center gap-5">
-      <div className="flex flex-col items-center gap-1.5 text-center">
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex h-[64px] flex-col items-center justify-center gap-1.5 text-center">
         <span className="glass flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-muted-foreground">
           <ShieldCheck className="size-3.5 text-status-connected" />
           Censorship-circumvention tunnel
@@ -65,7 +65,7 @@ function MainScreen() {
     <div className="relative z-10 flex h-full flex-col items-center overflow-y-auto px-6 pt-2 pb-6">
       <nav
         aria-label="Sections"
-        className="glass mb-5 flex shrink-0 items-center gap-1 rounded-full p-1"
+        className="glass mb-4 flex shrink-0 items-center gap-1 rounded-2xl p-1.5"
       >
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
@@ -74,9 +74,9 @@ function MainScreen() {
             onClick={() => setTab(id)}
             aria-pressed={tab === id}
             className={cn(
-              "flex min-h-11 items-center gap-1.5 rounded-full px-4 text-xs font-semibold transition-all",
+              "flex min-h-11 items-center gap-1.5 rounded-xl px-4 text-xs font-semibold transition-all",
               tab === id
-                ? "bg-primary text-primary-foreground shadow-lg"
+                ? "bg-primary text-primary-foreground shadow-[0_4px_20px_-4px_var(--color-primary)]"
                 : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
             )}
           >
@@ -132,6 +132,7 @@ export function App() {
         <div className="relative flex h-svh w-full flex-col overflow-hidden bg-background">
           <AmbientBackground />
           <TitleBar />
+          <div className="topline-gradient h-px w-full shrink-0" aria-hidden />
           <div className="relative min-h-0 flex-1">
             <AnimatePresence mode="sync">
               {sidecarError ? (

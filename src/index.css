@@ -247,6 +247,15 @@
   background-clip: text;
   color: transparent;
 }
+.topline-gradient {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--color-primary) 70%, transparent) 30%,
+    color-mix(in oklch, var(--color-status-connected) 70%, transparent) 70%,
+    transparent
+  );
+}
 .grid-overlay {
   background-image:
     linear-gradient(color-mix(in oklch, white 5%, transparent) 1px, transparent 1px),

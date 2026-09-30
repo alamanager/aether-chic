@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod aether;
+mod cmd;
 mod commands;
 mod error;
 mod events;
@@ -38,7 +39,6 @@ fn main() {
             commands::set_close_to_tray,
             commands::get_system_proxy,
             commands::set_system_proxy,
-            commands::get_http_proxy,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

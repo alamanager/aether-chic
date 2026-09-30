@@ -19,9 +19,6 @@ pub struct AetherManager {
     session: Option<PtySession>,
     state: ConnectionState,
     user_requested_stop: bool,
-    /// Address of the core's native HTTP proxy (SOCKS port + 1, passed via
-    /// --http-proxy since the v2.1.0 pin) — Some only while Connected.
-    http_proxy_addr: Option<String>,
     /// Consecutive auto-retry attempts for the current connection lineage.
     /// Reset to 0 on a fresh user-initiated connect, on reaching Connected
     /// (a proven-working connection earns a full retry budget for whatever
@@ -35,7 +32,6 @@ impl AetherManager {
             session: None,
             state: ConnectionState::Idle,
             user_requested_stop: false,
-            http_proxy_addr: None,
             retry_count: 0,
         }
     }
@@ -43,17 +39,6 @@ impl AetherManager {
     pub fn status(&self) -> ConnectionState {
         self.state.clone()
     }
-
-    pub fn http_proxy_addr(&self) -> Option<String> {
-        self.http_proxy_addr.clone()
-    }
-}
-
-/// Clears the remembered HTTP proxy address. Call whenever the tunnel is no
-/// longer Connected so a stale port is never advertised after the session
-/// behind it is gone.
-fn clear_http_proxy(manager: &Arc<Mutex<AetherManager>>) {
-    manager.lock().unwrap().http_proxy_addr = None;
 }
 
 fn app_data_dir(app: &AppHandle) -> PathBuf {
@@ -232,7 +217,7 @@ fn handle_unexpected_failure(
         mgr.retry_count
     };
     orphan::clear_pid(&data_dir);
-    clear_http_proxy(&manager);
+
 
     if attempt > status::MAX_AUTO_RETRIES {
         set_state_and_emit(
@@ -386,9 +371,9 @@ fn monitor_connect(
             // rather than inheriting whatever it took to get here.
             mgr.retry_count = 0;
             // The core serves its native HTTP proxy on SOCKS port + 1 (see
-            // profiles::http_proxy_addr) — remember it for get_http_proxy.
+            // profiles::http_proxy_addr) — the frontend computes the same
+            // address locally, so nothing needs remembering here.
             let http_str = http.to_string();
-            mgr.http_proxy_addr = Some(http_str.clone());
             drop(mgr);
             let _ = app.emit(
                 LOG_EVENT,
@@ -525,7 +510,7 @@ pub fn request_disconnect(
         // Mid-backoff: the retry thread checks user_requested_stop (just set
         // above) before respawning, so setting the flag is enough — there is
         // no process to wait on, so reflect Idle immediately.
-        clear_http_proxy(&manager);
+    
         set_state_and_emit(app, manager, ConnectionState::Idle);
         return Ok(());
     }
@@ -550,7 +535,7 @@ pub fn request_disconnect(
                 mgr.user_requested_stop = false;
                 drop(mgr);
                 orphan::clear_pid(&app_data_dir(&app));
-                clear_http_proxy(&manager);
+            
                 set_state_and_emit(&app, &manager, ConnectionState::Idle);
                 return;
             }
@@ -579,7 +564,7 @@ pub fn submit_access_code(
 /// blocks briefly rather than spawning a thread, and skips emitting events
 /// nobody is left to receive.
 pub fn shutdown_blocking(manager: &Arc<Mutex<AetherManager>>, data_dir: &Path) {
-    clear_http_proxy(manager);
+
     let mut mgr = manager.lock().unwrap();
     if let Some(session) = mgr.session.as_mut() {
         session.send_ctrl_c();
@@ -590,4 +575,3 @@ pub fn shutdown_blocking(manager: &Arc<Mutex<AetherManager>>, data_dir: &Path) {
     drop(mgr);
     orphan::clear_pid(data_dir);
 }
-

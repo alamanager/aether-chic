@@ -49,8 +49,10 @@ fn kill_pid(pid: u32) {
 
 #[cfg(windows)]
 fn is_alive(pid: u32) -> bool {
-    std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}")])
+    let mut cmd = std::process::Command::new("tasklist");
+    // Silent: no console flash on every app start.
+    crate::cmd::silent(&mut cmd);
+    cmd.args(["/FI", &format!("PID eq {pid}")])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
         .unwrap_or(false)
@@ -58,7 +60,7 @@ fn is_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn kill_pid(pid: u32) {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/F"])
-        .status();
+    let mut cmd = std::process::Command::new("taskkill");
+    crate::cmd::silent(&mut cmd);
+    let _ = cmd.args(["/PID", &pid.to_string(), "/F"]).status();
 }

@@ -19,7 +19,11 @@ use std::process::Command;
 const REG_PATH: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
 fn reg(args: &[&str]) -> Result<String, String> {
-    let out = Command::new("reg")
+    let mut cmd = Command::new("reg");
+    // Silent: every spawn of a console binary flashes a CMD window otherwise
+    // (this runs 4+ times per proxy toggle — the "ten flashing windows").
+    crate::cmd::silent(&mut cmd);
+    let out = cmd
         .args(args)
         .output()
         .map_err(|e| format!("failed to run `reg`: {e}"))?;

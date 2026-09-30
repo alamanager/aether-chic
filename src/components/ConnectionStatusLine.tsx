@@ -75,9 +75,10 @@ const DOT: Record<string, string> = {
 };
 
 /**
- * Status pill (colored dot + primary label) over a mono secondary line.
- * The pill carries the only small-text status color — a filled dot, never
- * tinted text — so contrast stays intact in both themes.
+ * Fixed-height status rail (72px in every state): dot + primary + one mono
+ * secondary line + a reserved progress slot. Nothing here ever changes size,
+ * so connecting never shifts the page — the progress slot simply stays empty
+ * outside Connecting.
  */
 export function ConnectionStatusLine() {
   const status = useConnectionStore((s) => s.status);
@@ -107,18 +108,18 @@ export function ConnectionStatusLine() {
   const { formatted: attemptElapsed, totalSeconds: attemptSeconds } = useElapsed(
     isAttempting ? attemptStartedAt : null,
   );
-  // Tor reports bootstrap progress in the log stream ("reaching the network:
-  // N%"), tracked as one number in the store — surface it so minutes of
-  // bootstrapping don't read as hung.
-  const isTorAttempt =
-    isAttempting && (extra === "tor" || extra === "tor_reverse" || extra === "tor_only");
-  const shownTorPct = isTorAttempt ? torPct : null;
   // Capped below 100 until the backend actually reports Connected — hitting
   // 100% here would claim done before the state machine agrees.
   const scanPercent =
     scanBudgetSecs != null
       ? Math.min(99, Math.round((attemptSeconds / scanBudgetSecs) * 100))
       : null;
+
+  // Tor reports bootstrap progress as one number in the store — surface it
+  // so minutes of bootstrapping don't read as hung.
+  const isTorAttempt =
+    isAttempting && (extra === "tor" || extra === "tor_reverse" || extra === "tor_only");
+  const shownTorPct = isTorAttempt ? torPct : null;
 
   let primary: string;
   let secondary: string;
@@ -163,28 +164,24 @@ export function ConnectionStatusLine() {
     <div
       aria-live="polite"
       aria-atomic="true"
-      className="flex flex-col items-center gap-2 text-center"
+      className="glass flex h-[104px] w-full max-w-sm flex-col items-center justify-center gap-1.5 rounded-2xl px-4 text-center"
     >
       <AnimatePresence mode="wait">
         <motion.span
           key={status.state}
           {...TEXT_TRANSITION}
-          className="glass flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-foreground"
+          className="flex items-center gap-2 text-sm font-semibold text-foreground"
         >
           <span className={cn("size-2 rounded-full", DOT[status.state])} aria-hidden />
           {primary}
         </motion.span>
       </AnimatePresence>
-      <AnimatePresence mode="wait">
-        <motion.span
-          key={status.state}
-          {...TEXT_TRANSITION}
-          className="block min-h-5 max-w-xs truncate font-mono text-xs text-muted-foreground"
-        >
-          {secondary}
-        </motion.span>
-      </AnimatePresence>
-      {status.state === "Connecting" && <ScanProgressBar percent={scanPercent} />}
+      <span className="block min-h-5 w-full truncate font-mono text-xs text-muted-foreground">
+        {secondary}
+      </span>
+      <div className="flex h-1.5 items-center justify-center">
+        {status.state === "Connecting" && <ScanProgressBar percent={scanPercent} />}
+      </div>
     </div>
   );
 }

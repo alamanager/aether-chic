@@ -58,10 +58,3 @@ pub fn get_system_proxy() -> Result<bool, AetherError> {
 pub fn set_system_proxy(enabled: bool, server: String) -> Result<(), AetherError> {
     crate::sysproxy::set(enabled, &server).map_err(AetherError::Internal)
 }
-
-/// Local HTTP→SOCKS bridge address ("127.0.0.1:1820") while Connected —
-/// None when the tunnel (and with it the bridge) isn't running.
-#[tauri::command]
-pub fn get_http_proxy(state: State<AppState>) -> Option<String> {
-    state.manager.lock().unwrap().http_proxy_addr()
-}
