@@ -1,11 +1,21 @@
 //! Windows system-proxy switch for the tunnel's SOCKS5 endpoint.
 //!
-//! Writes the per-user WinInet proxy (`HKCU\...\Internet Settings`) via the
-//! built-in `reg` CLI — no new crates — then broadcasts `WM_SETTINGCHANGE`
-//! so browsers pick it up immediately. Non-Windows targets get a clean
-//! error instead of a silent no-op.
-//! ponytail: registry diff is not tracked; if a toggle ever fails halfway,
-//! re-flipping the switch re-applies both values from scratch.
+//! Mechanism mirrors v2rayN's ProxySettingWindows (the working reference,
+//! read in full): a per-protocol `ProxyServer` value + `ProxyOverride`
+//! bypass list under HKCU\...\Internet Settings, activated with WinInet
+//! `INTERNET_OPTION_SETTINGS_CHANGED` + `INTERNET_OPTION_REFRESH`.
+//!
+//! Two details that broke the first version of this module:
+//!  1. A bare "host:port" ProxyServer means HTTP proxy for ALL protocols —
+//!     browsers then speak plain HTTP to our SOCKS5 port and everything
+//!     fails. A SOCKS-only endpoint MUST be written as "socks=host:port".
+//!     (v2rayN gets away with the bare form because it also runs an HTTP
+//!     inbound; we only have SOCKS5, so the prefix is mandatory.)
+//!  2. A WM_SETTINGCHANGE broadcast does NOT refresh WinInet's cached proxy
+//!     config — only InternetSetOption(SETTINGS_CHANGED)+REFRESH does.
+//! ponytail: disabling wipes ProxyServer/Override instead of restoring
+//! whatever was there before — same as v2rayN's fallback. Snapshot/restore
+//! only if a user ever complains.
 
 use std::process::Command;
 
@@ -23,13 +33,30 @@ fn reg(args: &[&str]) -> Result<String, String> {
 }
 
 #[cfg(windows)]
-fn broadcast_change() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+fn refresh() {
+    use windows_sys::Win32::Networking::WinInet::{
+        INTERNET_OPTION_REFRESH, INTERNET_OPTION_SETTINGS_CHANGED, InternetSetOptionW,
     };
-    // "Environment" is the conventional lParam for a proxy/settings change.
-    let setting: Vec<u16> = "Environment\0".encode_utf16().collect();
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
+    };
     unsafe {
+        // Makes WinInet re-read the registry — without this the new values
+        // sit ignored in HKCU until reboot.
+        InternetSetOptionW(
+            std::ptr::null_mut(),
+            INTERNET_OPTION_SETTINGS_CHANGED,
+            std::ptr::null_mut(),
+            0,
+        );
+        InternetSetOptionW(
+            std::ptr::null_mut(),
+            INTERNET_OPTION_REFRESH,
+            std::ptr::null_mut(),
+            0,
+        );
+        // ...plus a broadcast on top for non-WinInet consumers.
+        let setting: Vec<u16> = "Environment\0".encode_utf16().collect();
         let mut _result: usize = 0;
         SendMessageTimeoutW(
             HWND_BROADCAST,
@@ -50,8 +77,13 @@ pub fn get() -> Result<bool, String> {
     }
     #[cfg(windows)]
     {
-        let stdout = reg(&["query", REG_PATH, "/v", "ProxyEnable"])?;
-        Ok(stdout.contains("0x1"))
+        match reg(&["query", REG_PATH, "/v", "ProxyEnable"]) {
+            Ok(stdout) => Ok(stdout.contains("0x1")),
+            // Never configured on this machine → effectively off, not an
+            // error (otherwise the UI switch would stay disabled forever).
+            Err(e) if e.contains("unable to find") => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -63,34 +95,39 @@ pub fn set(enabled: bool, server: &str) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        if server.trim().is_empty() {
-            return Err("proxy server address is empty".into());
-        }
         if enabled {
+            let server = server.trim();
+            if server.is_empty() {
+                return Err("proxy server address is empty".into());
+            }
+            // The "socks=" prefix is MANDATORY for a SOCKS-only endpoint —
+            // a bare host:port would be treated as an HTTP proxy (see docs).
+            let proxy = format!("socks={server}");
             reg(&[
-                "add",
-                REG_PATH,
-                "/v",
-                "ProxyServer",
-                "/t",
-                "REG_SZ",
-                "/d",
-                server,
+                "add", REG_PATH, "/v", "ProxyServer", "/t", "REG_SZ", "/d", proxy.as_str(),
                 "/f",
             ])?;
+            reg(&[
+                "add", REG_PATH, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", "<local>",
+                "/f",
+            ])?;
+            // A stale PAC URL would override ProxyServer — make sure it's gone.
+            let _ = reg(&["delete", REG_PATH, "/v", "AutoConfigURL", "/f"]);
+            reg(&[
+                "add", REG_PATH, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f",
+            ])?;
+        } else {
+            reg(&[
+                "add", REG_PATH, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f",
+            ])?;
+            reg(&[
+                "add", REG_PATH, "/v", "ProxyServer", "/t", "REG_SZ", "/d", "", "/f",
+            ])?;
+            reg(&[
+                "add", REG_PATH, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", "", "/f",
+            ])?;
         }
-        reg(&[
-            "add",
-            REG_PATH,
-            "/v",
-            "ProxyEnable",
-            "/t",
-            "REG_DWORD",
-            "/d",
-            if enabled { "1" } else { "0" },
-            "/f",
-        ])?;
-        broadcast_change();
+        refresh();
         Ok(())
     }
 }
