@@ -328,13 +328,7 @@ fn monitor_connect(
             // usable (observed: Tor stuck at 15% fetching consensus, Psiphon
             // ~6s behind). Confirm real traffic flows before calling it
             // Connected — the probe sleeps, so the lock must go first.
-            let http: std::net::SocketAddr = profiles::http_proxy_addr(&profile.bind_address)
-                .parse()
-                .unwrap_or_else(|_| {
-                    "127.0.0.1:1820"
-                        .parse()
-                        .expect("loopback literal always parses")
-                });
+            let http = profiles::http_proxy_socket(&profile.bind_address);
             let needs_probe = profile.extra_transport != ExtraTransport::None;
             drop(mgr);
             if needs_probe
@@ -382,7 +376,9 @@ fn monitor_connect(
                 return;
             }
             let new_state = ConnectionState::Connected {
-                socks_addr: profile.bind_address.clone(),
+                // Report the connectable address: a 0.0.0.0 bind is real for
+                // the core but useless to clients (see status::client_addr).
+                socks_addr: status::client_addr(&socks).to_string(),
                 connected_at_ms: now_millis(),
             };
             mgr.state = new_state.clone();
@@ -429,8 +425,12 @@ fn monitor_connect(
     }
 }
 
-/// Watches an established connection purely for an unexpected process exit —
-/// there is no polling needed beyond that once `Connected` is reached.
+/// Watches an established connection for an unexpected process exit AND for
+/// a silently stalled tunnel: the port can stay open while nothing flows
+/// (observed in the field as "Connected but no internet"), and only a real
+/// fetch proves otherwise. Three failed heartbeats in a row feed the same
+/// auto-retry path as a process exit, so a dead tunnel heals itself instead
+/// of sitting green-but-dead.
 fn monitor_connected(
     app: AppHandle,
     manager: Arc<Mutex<AetherManager>>,
@@ -438,6 +438,9 @@ fn monitor_connected(
     data_dir: PathBuf,
     profile: ConnectionProfile,
 ) {
+    let http = profiles::http_proxy_socket(&profile.bind_address);
+    let mut ticks: u32 = 0;
+    let mut dead: u32 = 0;
     loop {
         std::thread::sleep(Duration::from_millis(500));
         let mut mgr = manager.lock().unwrap();
@@ -454,6 +457,42 @@ fn monitor_connected(
                 data_dir,
                 profile,
                 format!("Lost connection unexpectedly ({exit})"),
+                "connected",
+            );
+            return;
+        }
+        // Heartbeat every ~15s. The fetch runs WITHOUT the lock: a dead
+        // tunnel can stall the read up to its timeout, and disconnect()
+        // needs that same lock to stop us.
+        ticks += 1;
+        let check = ticks % 30 == 0;
+        drop(mgr);
+        if !check {
+            continue;
+        }
+        let alive = status::traffic_flows(&http);
+        let mut mgr = manager.lock().unwrap();
+        if mgr.user_requested_stop {
+            return;
+        }
+        if alive {
+            dead = 0;
+            continue;
+        }
+        dead += 1;
+        if dead >= 3 {
+            if let Some(session) = mgr.session.as_mut() {
+                session.kill();
+            }
+            mgr.session = None;
+            drop(mgr);
+            handle_unexpected_failure(
+                app,
+                manager,
+                binary,
+                data_dir,
+                profile,
+                "Tunnel stopped carrying traffic".into(),
                 "connected",
             );
             return;

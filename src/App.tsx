@@ -1,17 +1,19 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
-import { ShieldCheck } from "lucide-react";
+import { House, ScrollText, Settings2, ShieldCheck } from "lucide-react";
 import { ConnectButton } from "@/components/ConnectButton";
 import { ConnectionStatusLine } from "@/components/ConnectionStatusLine";
 import { TorStallGuard } from "@/components/TorStallGuard";
 import { ConnectionInfo } from "@/components/ConnectionInfo";
-import { AdvancedPanel } from "@/components/AdvancedPanel";
+import { SettingsTab } from "@/components/SettingsTab";
+import { LogsTab } from "@/components/LogsTab";
 import { CloseToTrayToggle } from "@/components/CloseToTrayToggle";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { SidecarErrorScreen } from "@/components/SidecarErrorScreen";
 import { AccessCodePrompt } from "@/components/AccessCodePrompt";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TitleBar } from "@/components/TitleBar";
+import { cn } from "@/lib/utils";
 import { initConnectionListeners, useConnectionStore } from "@/state/connectionStore";
 
 const SCREEN_TRANSITION = {
@@ -21,10 +23,18 @@ const SCREEN_TRANSITION = {
   transition: { duration: 0.16, ease: [0.22, 1, 0.36, 1] as const },
 };
 
-function MainScreen() {
+type Tab = "home" | "settings" | "logs";
+
+const TABS: { id: Tab; label: string; icon: typeof House }[] = [
+  { id: "home", label: "Home", icon: House },
+  { id: "settings", label: "Settings", icon: Settings2 },
+  { id: "logs", label: "Logs", icon: ScrollText },
+];
+
+function HomeTab() {
   const attemptId = useConnectionStore((s) => s.attemptId);
   return (
-    <div className="relative z-10 flex h-full flex-col items-center gap-5 overflow-y-auto px-6 pt-2 pb-6">
+    <div className="flex flex-col items-center gap-5">
       <div className="flex flex-col items-center gap-1.5 text-center">
         <span className="glass flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-muted-foreground">
           <ShieldCheck className="size-3.5 text-status-connected" />
@@ -39,9 +49,66 @@ function MainScreen() {
       <TorStallGuard key={attemptId} />
       <AccessCodePrompt key={attemptId} />
       <ConnectionInfo />
-      <AdvancedPanel />
       <div className="w-full max-w-sm">
         <CloseToTrayToggle />
+      </div>
+    </div>
+  );
+}
+
+function MainScreen() {
+  const [tab, setTab] = useState<Tab>("home");
+  const status = useConnectionStore((s) => s.status);
+  const connected = status.state === "Connected";
+
+  return (
+    <div className="relative z-10 flex h-full flex-col items-center overflow-y-auto px-6 pt-2 pb-6">
+      <nav
+        aria-label="Sections"
+        className="glass mb-5 flex shrink-0 items-center gap-1 rounded-full p-1"
+      >
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            aria-pressed={tab === id}
+            className={cn(
+              "flex min-h-11 items-center gap-1.5 rounded-full px-4 text-xs font-semibold transition-all",
+              tab === id
+                ? "bg-primary text-primary-foreground shadow-lg"
+                : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
+            )}
+          >
+            <Icon className="size-3.5" />
+            {label}
+            {id === "home" && connected && (
+              <span
+                aria-hidden
+                className={cn(
+                  "size-1.5 rounded-full",
+                  tab === id ? "bg-primary-foreground" : "bg-status-connected",
+                )}
+              />
+            )}
+          </button>
+        ))}
+      </nav>
+      <div className="flex w-full flex-1 flex-col items-center">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.12 }}
+            className="flex w-full flex-col items-center"
+          >
+            {tab === "home" && <HomeTab />}
+            {tab === "settings" && <SettingsTab />}
+            {tab === "logs" && <LogsTab />}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

@@ -11,6 +11,15 @@ pub fn parse_bind_address(addr: &str) -> SocketAddr {
 
 /// When Aether listens on 0.0.0.0, we probe 127.0.0.1 instead.
 fn probe_addr(listen: &SocketAddr) -> SocketAddr {
+    client_addr(listen)
+}
+
+/// The address local clients should use for a listener: an unspecified
+/// (0.0.0.0) bind is not connectable, so it maps to loopback. Used for
+/// liveness probes AND for every address shown in the UI / handed to the
+/// system proxy — reporting 0.0.0.0:port to browsers silently breaks them
+/// (observed: system proxy set to 0.0.0.0:1820 never connects anywhere).
+pub fn client_addr(listen: &SocketAddr) -> SocketAddr {
     if listen.ip().is_unspecified() {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
     } else {
@@ -51,8 +60,7 @@ pub fn connect_timeout(scan_mode: &ScanMode) -> Duration {
 /// than any scan-mode timeout.
 pub const EXTRA_TRANSPORT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// One plain-HTTP fetch of api.ipify.org through the local HTTP proxy.
-/// Proves the tunnel carries real traffic, not just an open port. std only;
+/// One plain-HTTP fetch of api.ipify.org through the local HTTP proxy./// Proves the tunnel carries real traffic, not just an open port. std only;
 /// hostnames stay in the absolute-URI form so the proxy resolves them.
 fn probe_once(http: &SocketAddr) -> bool {
     let mut s = match TcpStream::connect_timeout(http, Duration::from_secs(5)) {
@@ -85,6 +93,12 @@ fn probe_once(http: &SocketAddr) -> bool {
     }
     let head = String::from_utf8_lossy(&buf[..total]);
     head.starts_with("HTTP/") && head.contains(" 200 ")
+}
+
+/// Single traffic check for the Connected heartbeat: true when the tunnel
+/// carries a real fetch right now.
+pub fn traffic_flows(http: &SocketAddr) -> bool {
+    probe_once(http)
 }
 
 /// Blocks until the tunnel carries traffic or `deadline` passes. Only used

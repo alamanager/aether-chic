@@ -273,12 +273,22 @@ fn default_bind_address() -> String {
 /// HTTP endpoint served by the core next to SOCKS5: same IP, port + 1.
 /// Falls back to 127.0.0.1:1820 when the bind address doesn't parse.
 pub fn http_proxy_addr(bind_address: &str) -> String {
+    http_proxy_socket(bind_address).to_string()
+}
+
+/// Socket version of the above. An unspecified (0.0.0.0) bind maps to
+/// loopback — see status::client_addr — because 0.0.0.0 is not connectable
+/// and must never be reported to clients or the system proxy.
+pub fn http_proxy_socket(bind_address: &str) -> std::net::SocketAddr {
     match bind_address.parse::<std::net::SocketAddr>() {
-        Ok(mut socks) => {
-            socks.set_port(socks.port().wrapping_add(1));
-            socks.to_string()
+        Ok(socks) => {
+            let mut http = super::status::client_addr(&socks);
+            http.set_port(socks.port().wrapping_add(1));
+            http
         }
-        Err(_) => "127.0.0.1:1820".into(),
+        Err(_) => "127.0.0.1:1820"
+            .parse()
+            .expect("loopback literal always parses"),
     }
 }
 
@@ -536,7 +546,7 @@ mod tests {
     #[test]
     fn http_proxy_follows_socks_port() {
         assert_eq!(http_proxy_addr("127.0.0.1:1819"), "127.0.0.1:1820");
-        assert_eq!(http_proxy_addr("0.0.0.0:1919"), "0.0.0.0:1920");
+        assert_eq!(http_proxy_addr("0.0.0.0:1919"), "127.0.0.1:1920");
         assert_eq!(http_proxy_addr("garbage"), "127.0.0.1:1820");
         let p = ConnectionProfile::default();
         let args = p.as_args();

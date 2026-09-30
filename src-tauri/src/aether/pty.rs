@@ -152,7 +152,13 @@ pub fn spawn(
     let writer = Arc::new(Mutex::new(raw_writer));
     let writer_for_thread = Arc::clone(&writer);
 
-    let prompts_done = Arc::new(AtomicBool::new(false));
+    // The full profile is always passed as CLI flags (see as_args), so the
+    // interactive setup is bypassed by construction and there is normally
+    // nothing to wait for — start done (a stray prompt is still answered by
+    // the path below if one ever appears). Starting false used to pin the UI
+    // on "Starting Aether…" for the whole session, because with flags no
+    // prompt ever arrives to complete the set.
+    let prompts_done = Arc::new(AtomicBool::new(true));
     let prompts_done_for_thread = Arc::clone(&prompts_done);
 
     std::thread::spawn(move || {
