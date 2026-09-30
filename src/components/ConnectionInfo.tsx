@@ -1,8 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Copy, Globe, MonitorUp, RefreshCw, Server } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useConnectionStore } from "@/state/connectionStore";
+
+const SYS_PROXY_PREF = "aether-sysproxy";
+
+function readSysProxyPref(): boolean {
+  try {
+    return localStorage.getItem(SYS_PROXY_PREF) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSysProxyPref(on: boolean) {
+  try {
+    if (on) localStorage.setItem(SYS_PROXY_PREF, "1");
+    else localStorage.removeItem(SYS_PROXY_PREF);
+  } catch {
+    /* private mode — preference just won't persist */
+  }
+}
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -81,6 +100,10 @@ export function ConnectionInfo() {
 
   const connected = status.state === "Connected";
   const socksAddr = connected ? status.socks_addr : null;
+  const attemptId = useConnectionStore((s) => s.attemptId);
+  // Which attempt the auto-apply below already ran for (a ref: re-running
+  // on every render would flip the switch in a loop).
+  const autoFor = useRef(0);
 
   const fetchIp = useCallback(async () => {
     setIpLoading(true);
@@ -116,8 +139,25 @@ export function ConnectionInfo() {
       setHttpAddr(null);
       setSysProxy(null);
       setProxyHint(null);
+      // Don't leave Windows pointing at a dead port after disconnect.
+      if (sysProxy) {
+        invoke("set_system_proxy", { enabled: false, server: "" }).catch(() => {});
+      }
     }
-  }, [connected, fetchIp]);
+    // Persisted choice: re-apply automatically on every connect so the
+    // switch "just stays". Runs once per attempt, fire-and-forget — the UI
+    // never blocks on it.
+    if (connected && httpAddr && readSysProxyPref() && autoFor.current !== attemptId) {
+      autoFor.current = attemptId;
+      setProxyBusy(true);
+      invoke("set_system_proxy", { enabled: true, server: httpAddr })
+        .then(() => setSysProxy(true))
+        .catch(() =>
+          setProxyHint("Couldn't re-apply system proxy automatically — flip the switch manually."),
+        )
+        .finally(() => setProxyBusy(false));
+    }
+  }, [connected, httpAddr, attemptId, sysProxy, fetchIp]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!connected || !socksAddr) return null;
@@ -139,6 +179,7 @@ export function ConnectionInfo() {
     try {
       await invoke("set_system_proxy", { enabled: on, server: on ? httpAddr : socksAddr });
       setSysProxy(on);
+      writeSysProxyPref(on);
     } catch (e) {
       // Backend without the sysproxy module (or a non-Windows target):
       // leave the switch off and explain the manual path.

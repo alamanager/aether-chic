@@ -23,6 +23,10 @@ interface ConnectionState {
    * lets the UI show real progress instead of an indefinite spinner. Reset
    * on every fresh attempt since it can differ by protocol/scan mode. */
   scanBudgetSecs: number | null;
+  /** Last Tor bootstrap % seen in the log stream (null when none). Updated
+   * in flushLogs so status text can subscribe to one number instead of the
+   * whole log array (which re-renders every 100ms during scans). */
+  torPercent: number | null;
   /** Monotonic key for controls that must reset between explicit connects. */
   attemptId: number;
   connect: () => Promise<void>;
@@ -86,12 +90,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   logs: [],
   sidecarError: null,
   scanBudgetSecs: null,
+  torPercent: null,
   attemptId: 0,
 
   connect: async () => {
     // A fresh user-initiated attempt should not inherit stale log-driven UI
     // prompts (notably a previous Zero Trust email-code request).
-    set((s) => ({ logs: [], scanBudgetSecs: null, attemptId: s.attemptId + 1 }));
+    set((s) => ({ logs: [], scanBudgetSecs: null, torPercent: null, attemptId: s.attemptId + 1 }));
     try {
       await invoke("connect", { profileOverride: get().profile });
     } catch (e) {
@@ -214,6 +219,7 @@ if (import.meta.env.DEV) {
 }
 
 const BUDGET_RE = /budget=(\d+)s/;
+const TOR_PCT_RE = /reaching the network:\s*(\d+)%/;
 
 /** Call once from App's top-level effect; returns a cleanup function. */
 export async function initConnectionListeners(): Promise<() => void> {
@@ -227,13 +233,17 @@ export async function initConnectionListeners(): Promise<() => void> {
     const batch = pendingLogs;
     pendingLogs = [];
     let budget: number | null = null;
+    let tor: number | null = null;
     for (const l of batch) {
       const m = BUDGET_RE.exec(l.line);
       if (m) budget = Number(m[1]);
+      const t = TOR_PCT_RE.exec(l.line);
+      if (t) tor = Number(t[1]);
     }
     useConnectionStore.setState((s) => ({
       logs: [...s.logs, ...batch].slice(-MAX_LOG_LINES),
       ...(budget !== null ? { scanBudgetSecs: budget } : {}),
+      ...(tor !== null ? { torPercent: tor } : {}),
     }));
   };
 
@@ -241,8 +251,8 @@ export async function initConnectionListeners(): Promise<() => void> {
     listen<ConnectionStatus>("aether://status", (e) => {
       useConnectionStore.setState({
         status: e.payload,
-        // Fresh attempt — last attempt's budget no longer applies.
-        ...(e.payload.state === "Launching" ? { scanBudgetSecs: null } : {}),
+        // Fresh attempt — last attempt's budget/percent no longer apply.
+        ...(e.payload.state === "Launching" ? { scanBudgetSecs: null, torPercent: null } : {}),
       });
     }),
     listen<LogLine>("aether://log", (e) => {

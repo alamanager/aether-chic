@@ -8,7 +8,7 @@ pub enum AetherError {
     BinaryMissing(String),
     #[error("failed to launch Aether: {0}")]
     SpawnFailed(String),
-    #[error("port {0} is already in use by another process")]
+    #[error("port {0} is already in use — disconnect the current session first")]
     PortInUse(u16),
     #[error("no active connection")]
     NotConnected,

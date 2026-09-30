@@ -29,6 +29,24 @@ fn reg(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Proxy bypass list: plain hostnames, localhost, and all RFC 1918 private
+/// ranges. Windows' "<local>" alone does NOT cover literal LAN IPs, so
+/// without these every 192.168.x.x / 10.x.x.x address would be sent into
+/// the tunnel (and fail there) instead of going direct on the LAN.
+fn proxy_bypass() -> String {
+    let mut parts = vec![
+        "<local>".to_string(),
+        "localhost".to_string(),
+        "127.*".to_string(),
+        "10.*".to_string(),
+        "192.168.*".to_string(),
+    ];
+    for i in 16..=31 {
+        parts.push(format!("172.{i}.*"));
+    }
+    parts.join(";")
+}
+
 #[cfg(windows)]
 fn refresh() {
     use windows_sys::Win32::Networking::WinInet::{
@@ -103,7 +121,14 @@ pub fn set(enabled: bool, server: &str) -> Result<(), String> {
                 "add", REG_PATH, "/v", "ProxyServer", "/t", "REG_SZ", "/d", server, "/f",
             ])?;
             reg(&[
-                "add", REG_PATH, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", "<local>",
+                "add",
+                REG_PATH,
+                "/v",
+                "ProxyOverride",
+                "/t",
+                "REG_SZ",
+                "/d",
+                proxy_bypass().as_str(),
                 "/f",
             ])?;
             // A stale PAC URL would override ProxyServer — make sure it's gone.
