@@ -16,6 +16,14 @@ export type IpVersion = "v4" | "v6" | "both";
 export type MasqueNoize = "firewall" | "gfw" | "off";
 export type WgNoize = "balanced" | "aggressive" | "light" | "off";
 export type ZeroTrustAuth = "email" | "service" | "token";
+export type ExtraTransport =
+  | "none"
+  | "tor"
+  | "tor_reverse"
+  | "tor_only"
+  | "psiphon"
+  | "psiphon_reverse"
+  | "psiphon_only";
 
 export interface ConnectionProfile {
   protocol: Protocol;
@@ -47,6 +55,10 @@ export interface ConnectionProfile {
   zero_trust_gateway: boolean;
   /** Aether ≥1.5.0 traffic-routing rules. */
   route_block: string;
+  /** Aether ≥1.7.0: chain out through another proxy/VPN app. */
+  upstream: string;
+  /** Aether ≥2.0/2.1: built-in Tor / Psiphon transports (needs core's pt/). */
+  extra_transport: ExtraTransport;
   route_direct: string;
   routes_file: string;
 }

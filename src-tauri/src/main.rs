@@ -5,7 +5,6 @@ mod commands;
 mod error;
 mod events;
 mod focus;
-mod http_proxy;
 mod state;
 mod sysproxy;
 mod tray;

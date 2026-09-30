@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   ConnectionProfile,
   ConnectionStatus,
+  ExtraTransport,
   LogLine,
   MasqueNoize,
   WgNoize,
@@ -45,6 +46,8 @@ interface ConnectionState {
   setRouteBlock: (route_block: string) => void;
   setRouteDirect: (route_direct: string) => void;
   setRoutesFile: (routes_file: string) => void;
+  setUpstream: (upstream: string) => void;
+  setExtraTransport: (extra_transport: ExtraTransport) => void;
   retryAfterSidecarError: () => void;
 }
 
@@ -70,6 +73,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     route_block: "",
     route_direct: "",
     routes_file: "",
+    upstream: "",
+    extra_transport: "none",
   },
   logs: [],
   sidecarError: null,
@@ -169,6 +174,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   setRoutesFile: (routes_file) =>
     set((s) => ({ profile: { ...s.profile, routes_file } })),
+
+  setUpstream: (upstream) =>
+    set((s) => ({ profile: { ...s.profile, upstream } })),
+
+  setExtraTransport: (extra_transport) =>
+    set((s) => ({ profile: { ...s.profile, extra_transport } })),
 
   // Clears the fallback screen so the user can attempt Connect again (e.g.
   // after fixing a broken install) — the next connect() call will re-set

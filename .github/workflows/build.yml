@@ -73,6 +73,8 @@ jobs:
           if ($actual -ne $expected) { throw "Checksum mismatch: $actual != $expected" }
           Expand-Archive aether.zip -DestinationPath aether-extract
           Move-Item aether-extract/aether.exe src-tauri/binaries/aether.exe
+          # v2.x ships Tor/Psiphon transports in pt/ beside the binary.
+          if (Test-Path aether-extract/pt) { Move-Item aether-extract/pt src-tauri/binaries/pt }
 
       - run: npm ci
 

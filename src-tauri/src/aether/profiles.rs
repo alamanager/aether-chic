@@ -106,8 +106,7 @@ impl WgNoize {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ConnectionProfile {
-    pub protocol: Protocol,
+pub struct ConnectionProfile {    pub protocol: Protocol,
     pub scan_mode: ScanMode,
     pub ip_version: IpVersion,
     /// Aether ≥1.1.1: reuse the last known-working gateway with a quick
@@ -172,6 +171,45 @@ pub struct ConnectionProfile {
     /// Optional path to an Aether routing file with [block]/[direct] sections.
     #[serde(default)]
     pub routes_file: String,
+    /// Aether ≥1.7.0: dial out through another proxy (chain behind a VPN or
+    /// proxy app already on the machine). Accepts socks5://, http:// or a
+    /// bare host:port (SOCKS5), with credentials in the URL.
+    #[serde(default)]
+    pub upstream: String,
+    /// Aether ≥2.0/2.1: built-in Tor / Psiphon transports. Exactly one mode
+    /// is ever passed (the CLI flags are mutually exclusive), so this is a
+    /// single enum rather than independent toggles that could combine badly.
+    #[serde(default)]
+    pub extra_transport: ExtraTransport,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtraTransport {
+    #[default]
+    None,
+    Tor,
+    TorReverse,
+    TorOnly,
+    Psiphon,
+    PsiphonReverse,
+    PsiphonOnly,
+}
+
+impl ExtraTransport {
+    /// The literal CLI flag, if any. Needs the v2.x core plus its `pt/`
+    /// transports folder next to the binary (bundled since the v2.1.0 pin).
+    pub fn as_flag(&self) -> Option<&'static str> {
+        match self {
+            ExtraTransport::None => None,
+            ExtraTransport::Tor => Some("--tor"),
+            ExtraTransport::TorReverse => Some("--tor-reverse"),
+            ExtraTransport::TorOnly => Some("--tor-only"),
+            ExtraTransport::Psiphon => Some("--psiphon"),
+            ExtraTransport::PsiphonReverse => Some("--psiphon-reverse"),
+            ExtraTransport::PsiphonOnly => Some("--psiphon-only"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -197,6 +235,18 @@ fn default_wg_noize() -> WgNoize {
 
 fn default_bind_address() -> String {
     "127.0.0.1:1819".into()
+}
+
+/// HTTP endpoint served by the core next to SOCKS5: same IP, port + 1.
+/// Falls back to 127.0.0.1:1820 when the bind address doesn't parse.
+pub fn http_proxy_addr(bind_address: &str) -> String {
+    match bind_address.parse::<std::net::SocketAddr>() {
+        Ok(mut socks) => {
+            socks.set_port(socks.port().wrapping_add(1));
+            socks.to_string()
+        }
+        Err(_) => "127.0.0.1:1820".into(),
+    }
 }
 
 impl ConnectionProfile {
@@ -246,6 +296,19 @@ impl ConnectionProfile {
         {
             args.push("--bind".into());
             args.push(self.bind_address.clone());
+        }
+        // Aether ≥1.6.0 serves a native HTTP CONNECT proxy next to SOCKS5 —
+        // this replaced the GUI's old hand-rolled bridge. Always on, on its
+        // own port (SOCKS port + 1) so the two stay separable in the UI.
+        let http_addr = http_proxy_addr(&self.bind_address);
+        args.push("--http-proxy".into());
+        args.push(http_addr);
+        if !self.upstream.trim().is_empty() {
+            args.push("--upstream".into());
+            args.push(self.upstream.trim().into());
+        }
+        if let Some(flag) = self.extra_transport.as_flag() {
+            args.push(flag.into());
         }
         if !self.dns.trim().is_empty() {
             args.push("--dns".into());
@@ -395,6 +458,8 @@ mod tests {
                 "--quick-reconnect",
                 "--noize",
                 "firewall",
+                "--http-proxy",
+                "127.0.0.1:1820",
                 "--dns",
                 "9.9.9.9,1.1.1.1",
                 "--team",
@@ -411,8 +476,38 @@ mod tests {
     }
 
     #[test]
-    fn zero_trust_email_is_provided_as_an_environment_value() {
-        let p = ConnectionProfile {
+    fn http_proxy_follows_socks_port() {
+        assert_eq!(http_proxy_addr("127.0.0.1:1819"), "127.0.0.1:1820");
+        assert_eq!(http_proxy_addr("0.0.0.0:1919"), "0.0.0.0:1920");
+        assert_eq!(http_proxy_addr("garbage"), "127.0.0.1:1820");
+        let p = ConnectionProfile::default();
+        let args = p.as_args();
+        let i = args.iter().position(|a| a == "--http-proxy").expect("missing --http-proxy");
+        assert_eq!(args.get(i + 1).map(String::as_str), Some("127.0.0.1:1820"));
+    }
+
+    #[test]
+    fn upstream_and_extra_transport_emit() {
+        let mut p = ConnectionProfile::default();
+        p.upstream = "socks5://127.0.0.1:1080".into();
+        p.extra_transport = ExtraTransport::Tor;
+        let args = p.as_args();
+        let i = args.iter().position(|a| a == "--upstream").expect("missing --upstream");
+        assert_eq!(args.get(i + 1).map(String::as_str), Some("socks5://127.0.0.1:1080"));
+        assert!(args.iter().any(|a| a == "--tor"));
+        assert!(!args.iter().any(|a| a == "--psiphon"));
+    }
+
+    #[test]
+    fn no_extra_transport_by_default() {
+        let p = ConnectionProfile::default();
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--tor" || a == "--psiphon"));
+        assert!(!args.iter().any(|a| a == "--upstream"));
+    }
+
+    #[test]
+    fn zero_trust_email_is_provided_as_an_environment_value() {        let p = ConnectionProfile {
             zero_trust_team: "acme".into(),
             access_email: "me@example.com".into(),
             ..Default::default()
@@ -448,6 +543,8 @@ impl Default for ConnectionProfile {
             route_block: String::new(),
             route_direct: String::new(),
             routes_file: String::new(),
+            upstream: String::new(),
+            extra_transport: ExtraTransport::None,
         }
     }
 }

@@ -13,6 +13,8 @@ import { IpVersionToggle } from "@/components/IpVersionToggle";
 import { MasqueTransportToggle } from "@/components/MasqueTransportToggle";
 import { NoizeProfileToggle } from "@/components/NoizeProfileToggle";
 import { BindAddressField } from "@/components/BindAddressField";
+import { UpstreamField } from "@/components/UpstreamField";
+import { ExtraTransportSelect } from "@/components/ExtraTransportSelect";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
 import { useConnectionStore } from "@/state/connectionStore";
@@ -118,6 +120,18 @@ export function AdvancedPanel() {
               tooltip="The local address Aether's SOCKS5 proxy listens on. Change the port to avoid conflicts, or enable LAN to share the tunnel with other devices on your network."
             >
               <BindAddressField />
+            </FieldRow>
+            <FieldRow
+              label="Upstream proxy (chain)"
+              tooltip="Dial out through another proxy or VPN app already running on this machine, e.g. socks5://127.0.0.1:1080 or http://proxy:8080 with optional user:password@ credentials. Empty means direct."
+            >
+              <UpstreamField />
+            </FieldRow>
+            <FieldRow
+              label="Extra transport"
+              tooltip="Built-in Tor or Psiphon from core v2.x — either carried inside the tunnel, used to reach the tunnel, or on its own. Needs the pt/ transports bundled with the app."
+            >
+              <ExtraTransportSelect />
             </FieldRow>
             <FieldRow
               label="Zero Trust (organization)"
