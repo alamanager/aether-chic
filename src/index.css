@@ -104,40 +104,42 @@
 }
 
 /* Light theme — same brand hue, paper surfaces. Toggled via
-   `.light` on <html> by ThemeToggle (persisted in localStorage). */
+   `.light` on <html> by ThemeToggle (persisted in localStorage).
+   No pure-white surfaces (design system); primary deepened so white
+   text on it passes AA (4.5:1). */
 .light {
     color-scheme: light;
-    --background: #f4f4f6;
+    --background: #e8ebf0;
     --foreground: #16161a;
-    --card: #ffffff;
+    --card: #f7f9fc;
     --card-foreground: #16161a;
-    --popover: #ffffff;
+    --popover: #f7f9fc;
     --popover-foreground: #16161a;
-    --primary: #ea580c;
+    --primary: #c2410c;
     --primary-foreground: #ffffff;
-    --secondary: #ececf0;
+    --secondary: #e2e6ed;
     --secondary-foreground: #16161a;
-    --muted: #ececf0;
+    --muted: #e2e6ed;
     --muted-foreground: #5b5b66;
-    --accent: #e4e4e9;
+    --accent: #d9dee7;
     --accent-foreground: #16161a;
     --destructive: #dc2626;
     --border: color-mix(in oklch, black 10%, transparent);
     --input: color-mix(in oklch, black 14%, transparent);
-    --ring: #ea580c;
-    --sidebar: #ffffff;
+    --ring: #c2410c;
+    --sidebar: #f7f9fc;
     --sidebar-foreground: #16161a;
-    --sidebar-primary: #ea580c;
+    --sidebar-primary: #c2410c;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #ececf0;
+    --sidebar-accent: #e2e6ed;
     --sidebar-accent-foreground: #16161a;
     --sidebar-border: color-mix(in oklch, black 10%, transparent);
-    --sidebar-ring: #ea580c;
+    --sidebar-ring: #c2410c;
 
-    --surface-1: #ffffff;
-    --surface-2: #ececf0;
-    --surface-3: #e2e2e8;
-    --surface-4: #d6d6de;
+    --surface-1: #f7f9fc;
+    --surface-2: #e7eaf0;
+    --surface-3: #dde1e9;
+    --surface-4: #d2d7e1;
     --status-connected: #0d9488;
     --status-connecting: #ea580c;
     --status-error: #dc2626;
@@ -148,6 +150,12 @@
   * {
     @apply border-border outline-ring/50;
     }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
   body {
     @apply bg-background text-foreground;
     }
@@ -226,8 +234,15 @@
 .anim-spin-slower { animation: spin-slow 9s linear infinite; }
 .anim-shimmer { animation: shimmer-slide 1.4s ease-in-out infinite; }
 .anim-float-soft { animation: float-soft 5s ease-in-out infinite; }
+/* Mount stagger for grouped cards/rows: fade-rise, transform/opacity only,
+   delays set inline per item (design system: stagger list 300-450ms). */
+@keyframes enter-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.anim-enter { animation: enter-rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
 @media (prefers-reduced-motion: reduce) {
-  .anim-spin-slower, .anim-shimmer, .anim-float-soft { animation: none; }
+  .anim-spin-slower, .anim-shimmer, .anim-float-soft, .anim-enter { animation: none; }
 }
 
 .glass {

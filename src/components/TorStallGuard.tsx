@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { useConnectionStore } from "@/state/connectionStore";
 import type { LogLine } from "@/types/connection";
 
@@ -54,8 +55,9 @@ export function TorStallGuard() {
 
   if (!msg) return null;
   return (
-    <div className="glass w-full max-w-sm rounded-2xl px-4 py-2.5 text-center text-xs leading-5 text-muted-foreground">
-      ⚠️ {msg}
+    <div className="glass flex w-full max-w-sm items-start gap-2 rounded-2xl px-4 py-2.5 text-xs leading-5 text-muted-foreground">
+      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-status-connecting" aria-hidden />
+      <span>{msg}</span>
     </div>
   );
 }

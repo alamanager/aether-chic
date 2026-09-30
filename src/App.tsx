@@ -74,7 +74,7 @@ function MainScreen() {
             onClick={() => setTab(id)}
             aria-pressed={tab === id}
             className={cn(
-              "flex min-h-11 items-center gap-1.5 rounded-xl px-4 text-xs font-semibold transition-all",
+              "flex min-h-11 items-center gap-1.5 rounded-xl px-4 text-xs font-semibold transition-all outline-none focus-visible:ring-2 focus-visible:ring-primary",
               tab === id
                 ? "bg-primary text-primary-foreground shadow-[0_4px_20px_-4px_var(--color-primary)]"
                 : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",

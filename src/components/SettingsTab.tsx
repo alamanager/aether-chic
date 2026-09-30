@@ -45,14 +45,19 @@ function FieldRow({
 function Group({
   icon,
   title,
+  delay,
   children,
 }: {
   icon: ReactNode;
   title: string;
+  delay?: number;
   children: ReactNode;
 }) {
   return (
-    <section className="glass w-full max-w-sm rounded-2xl p-4">
+    <section
+      className="glass anim-enter w-full max-w-sm rounded-2xl p-4"
+      style={delay ? { animationDelay: `${delay}ms` } : undefined}
+    >
       <h2 className="mb-3 flex items-center gap-2 text-[13px] font-bold tracking-wide text-foreground">
         <span className="grid size-7 place-items-center rounded-lg bg-primary/15 text-primary">
           {icon}
@@ -131,7 +136,7 @@ function QuickReconnectRow() {
 export function SettingsTab() {
   return (
     <div className="flex w-full flex-col items-center gap-3">
-      <Group icon={<Zap className="size-4" />} title="Transport">
+      <Group icon={<Zap className="size-4" />} title="Transport" delay={0}>
         <FieldRow
           label="Protocol"
           tooltip="MASQUE disguises traffic as normal HTTPS — best against strict censorship. WireGuard is lighter and faster. gool nests two WireGuard tunnels for extra security at a speed cost."
@@ -151,7 +156,7 @@ export function SettingsTab() {
         </FieldRow>
       </Group>
 
-      <Group icon={<Network className="size-4" />} title="Network">
+      <Group icon={<Network className="size-4" />} title="Network" delay={70}>
         <FieldRow
           label="IP Version"
           tooltip="Which address families to search for working routes. IPv4 is the safest default on most networks."
@@ -190,7 +195,7 @@ export function SettingsTab() {
         </FieldRow>
       </Group>
 
-      <Group icon={<ShieldCheck className="size-4" />} title="Privacy">
+      <Group icon={<ShieldCheck className="size-4" />} title="Privacy" delay={140}>
         <FieldRow
           label="Zero Trust (organization)"
           tooltip="Connect as a managed Cloudflare Zero Trust device instead of anonymous consumer WARP. Works with MASQUE and WireGuard. Leave the team empty for normal one-click mode."
