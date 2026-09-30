@@ -49,6 +49,8 @@ interface ConnectionState {
   setUpstream: (upstream: string) => void;
   setExtraTransport: (extra_transport: ExtraTransport) => void;
   setTorBridges: (tor_bridges: boolean) => void;
+  setPsiphonRegion: (psiphon_region: string) => void;
+  setPsiphonMode: (psiphon_mode: ConnectionProfile["psiphon_mode"]) => void;
   retryAfterSidecarError: () => void;
 }
 
@@ -77,6 +79,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     upstream: "",
     extra_transport: "none",
     tor_bridges: false,
+    psiphon_region: "",
+    psiphon_mode: "auto",
   },
   logs: [],
   sidecarError: null,
@@ -185,6 +189,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   setTorBridges: (tor_bridges) =>
     set((s) => ({ profile: { ...s.profile, tor_bridges } })),
+
+  setPsiphonRegion: (psiphon_region) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_region } })),
+
+  setPsiphonMode: (psiphon_mode) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_mode } })),
 
   // Clears the fallback screen so the user can attempt Connect again (e.g.
   // after fixing a broken install) — the next connect() call will re-set

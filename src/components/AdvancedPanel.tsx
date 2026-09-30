@@ -15,6 +15,7 @@ import { NoizeProfileToggle } from "@/components/NoizeProfileToggle";
 import { BindAddressField } from "@/components/BindAddressField";
 import { UpstreamField } from "@/components/UpstreamField";
 import { ExtraTransportSelect } from "@/components/ExtraTransportSelect";
+import { PsiphonOptions } from "@/components/PsiphonOptions";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
 import { useConnectionStore } from "@/state/connectionStore";
@@ -160,6 +161,7 @@ function TorBridgesRow() {
             >
               <ExtraTransportSelect />
               <TorBridgesRow />
+              <PsiphonOptions />
             </FieldRow>
             <FieldRow
               label="Zero Trust (organization)"

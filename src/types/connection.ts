@@ -61,6 +61,10 @@ export interface ConnectionProfile {
   extra_transport: ExtraTransport;
   /** Skip Tor's direct attempt, go straight to bridges. */
   tor_bridges: boolean;
+  /** Psiphon egress region (ISO alpha-2, "" = automatic). */
+  psiphon_region: string;
+  /** Psiphon shape: automatic / fronted-meek-only / direct. */
+  psiphon_mode: "auto" | "cdn" | "direct";
   route_direct: string;
   routes_file: string;
 }

@@ -82,6 +82,8 @@ const DOT: Record<string, string> = {
 export function ConnectionStatusLine() {
   const status = useConnectionStore((s) => s.status);
   const scanBudgetSecs = useConnectionStore((s) => s.scanBudgetSecs);
+  const extra = useConnectionStore((s) => s.profile.extra_transport);
+  const logs = useConnectionStore((s) => s.logs);
   const connectedAt = status.state === "Connected" ? status.connected_at_ms : null;
   const elapsed = useElapsed(connectedAt).formatted;
 
@@ -105,6 +107,21 @@ export function ConnectionStatusLine() {
   const { formatted: attemptElapsed, totalSeconds: attemptSeconds } = useElapsed(
     isAttempting ? attemptStartedAt : null,
   );
+  // Tor reports bootstrap progress in the log stream ("reaching the network:
+  // N%") — surface it so minutes of bootstrapping don't read as hung.
+  // Pure derivation during render, no state involved.
+  const isTorAttempt =
+    isAttempting && (extra === "tor" || extra === "tor_reverse" || extra === "tor_only");
+  let torPct: number | null = null;
+  if (isTorAttempt) {
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const m = /reaching the network:\s*(\d+)%/.exec(logs[i].line);
+      if (m) {
+        torPct = Number(m[1]);
+        break;
+      }
+    }
+  }
   // Capped below 100 until the backend actually reports Connected — hitting
   // 100% here would claim done before the state machine agrees.
   const scanPercent =
@@ -127,9 +144,11 @@ export function ConnectionStatusLine() {
     case "Connecting":
       primary = "Finding a route…";
       secondary =
-        scanPercent != null
-          ? `Still searching · ${attemptElapsed} · ${scanPercent}%`
-          : `Still searching · ${attemptElapsed}`;
+        torPct !== null
+          ? `Tor bootstrap ${torPct}% · ${attemptElapsed}`
+          : scanPercent != null
+            ? `Still searching · ${attemptElapsed} · ${scanPercent}%`
+            : `Still searching · ${attemptElapsed}`;
       break;
     case "Reconnecting":
       primary = "Reconnecting…";

@@ -186,6 +186,34 @@ pub struct ConnectionProfile {    pub protocol: Protocol,
     /// observed stuck fetching consensus). Only forwarded with a Tor mode.
     #[serde(default)]
     pub tor_bridges: bool,
+    /// Psiphon egress region (ISO alpha-2, e.g. "DE"). Empty = automatic.
+    /// Only forwarded with a Psiphon mode; the core treats it as a hard
+    /// filter, so a region with no current exit won't connect — retry Auto.
+    #[serde(default)]
+    pub psiphon_region: String,
+    /// Psiphon shape: automatic, fronted-meek-only (cdn, for networks that
+    /// block the rest) or no fronting (direct).
+    #[serde(default)]
+    pub psiphon_mode: PsiphonMode,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PsiphonMode {
+    #[default]
+    Auto,
+    Cdn,
+    Direct,
+}
+
+impl PsiphonMode {
+    pub fn as_flag(&self) -> Option<&'static str> {
+        match self {
+            PsiphonMode::Auto => None,
+            PsiphonMode::Cdn => Some("cdn"),
+            PsiphonMode::Direct => Some("direct"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -324,6 +352,21 @@ impl ConnectionProfile {
             )
         {
             args.push("--tor-bridges".into());
+        }
+        // Region/mode only make sense with a Psiphon mode active.
+        if matches!(
+            self.extra_transport,
+            ExtraTransport::Psiphon | ExtraTransport::PsiphonReverse | ExtraTransport::PsiphonOnly
+        ) {
+            let region = self.psiphon_region.trim().to_uppercase();
+            if !region.is_empty() {
+                args.push("--psiphon-region".into());
+                args.push(region);
+            }
+            if let Some(mode) = self.psiphon_mode.as_flag() {
+                args.push("--psiphon-mode".into());
+                args.push(mode.into());
+            }
         }
         if !self.dns.trim().is_empty() {
             args.push("--dns".into());
@@ -522,6 +565,23 @@ mod tests {
     }
 
     #[test]
+    fn psiphon_region_and_mode_gated() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::PsiphonOnly;
+        p.psiphon_region = "de".into();
+        p.psiphon_mode = PsiphonMode::Cdn;
+        let args = p.as_args();
+        let i = args.iter().position(|a| a == "--psiphon-region").expect("missing region");
+        assert_eq!(args.get(i + 1).map(String::as_str), Some("DE"));
+        let j = args.iter().position(|a| a == "--psiphon-mode").expect("missing mode");
+        assert_eq!(args.get(j + 1).map(String::as_str), Some("cdn"));
+        // Without a Psiphon mode neither flag is forwarded.
+        p.extra_transport = ExtraTransport::TorOnly;
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--psiphon-region" || a == "--psiphon-mode"));
+    }
+
+    #[test]
     fn tor_bridges_only_with_tor_mode() {
         let mut p = ConnectionProfile::default();
         p.extra_transport = ExtraTransport::TorOnly;
@@ -573,6 +633,8 @@ impl Default for ConnectionProfile {
             upstream: String::new(),
             extra_transport: ExtraTransport::None,
             tor_bridges: false,
+            psiphon_region: String::new(),
+            psiphon_mode: PsiphonMode::Auto,
         }
     }
 }

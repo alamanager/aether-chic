@@ -3,6 +3,7 @@ import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { ShieldCheck } from "lucide-react";
 import { ConnectButton } from "@/components/ConnectButton";
 import { ConnectionStatusLine } from "@/components/ConnectionStatusLine";
+import { TorStallGuard } from "@/components/TorStallGuard";
 import { ConnectionInfo } from "@/components/ConnectionInfo";
 import { AdvancedPanel } from "@/components/AdvancedPanel";
 import { CloseToTrayToggle } from "@/components/CloseToTrayToggle";
@@ -35,6 +36,7 @@ function MainScreen() {
       </div>
       <ConnectButton />
       <ConnectionStatusLine />
+      <TorStallGuard key={attemptId} />
       <AccessCodePrompt key={attemptId} />
       <ConnectionInfo />
       <AdvancedPanel />
