@@ -16,6 +16,7 @@ const LABELS: Record<ExtraTransport, string> = {
   psiphon: "Psiphon inside the tunnel",
   psiphon_reverse: "Tunnel through Psiphon",
   psiphon_only: "Psiphon only",
+  psiphon_direct: "Psiphon direct (console client)",
 };
 
 /**

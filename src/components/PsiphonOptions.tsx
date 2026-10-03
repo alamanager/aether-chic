@@ -44,7 +44,11 @@ export function PsiphonOptions() {
   const setMode = useConnectionStore((s) => s.setPsiphonMode);
 
   const locked = status.state !== "Idle" && status.state !== "Error";
-  const isPsiphon = extra === "psiphon" || extra === "psiphon_reverse" || extra === "psiphon_only";
+  const isPsiphon =
+    extra === "psiphon" ||
+    extra === "psiphon_reverse" ||
+    extra === "psiphon_only" ||
+    extra === "psiphon_direct";
   const disabled = locked || !isPsiphon;
 
   const trigger =

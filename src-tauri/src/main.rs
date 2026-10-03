@@ -6,6 +6,7 @@ mod commands;
 mod error;
 mod events;
 mod focus;
+mod psiphon_direct;
 mod state;
 mod sysproxy;
 mod tray;

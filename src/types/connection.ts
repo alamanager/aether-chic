@@ -23,7 +23,8 @@ export type ExtraTransport =
   | "tor_only"
   | "psiphon"
   | "psiphon_reverse"
-  | "psiphon_only";
+  | "psiphon_only"
+  | "psiphon_direct";
 
 export interface ConnectionProfile {
   protocol: Protocol;

@@ -227,6 +227,10 @@ pub enum ExtraTransport {
     Psiphon,
     PsiphonReverse,
     PsiphonOnly,
+    /// Direct console-client mode (psiphon_direct.rs): bypasses the Aether
+    /// core entirely. Produces NO core flags — the module drives
+    /// pt/psiphon-tunnel-core itself.
+    PsiphonDirect,
 }
 
 impl ExtraTransport {
@@ -241,7 +245,12 @@ impl ExtraTransport {
             ExtraTransport::Psiphon => Some("--psiphon"),
             ExtraTransport::PsiphonReverse => Some("--psiphon-reverse"),
             ExtraTransport::PsiphonOnly => Some("--psiphon-only"),
+            ExtraTransport::PsiphonDirect => None,
         }
+    }
+
+    pub fn is_direct(&self) -> bool {
+        matches!(self, ExtraTransport::PsiphonDirect)
     }
 }
 
@@ -589,6 +598,22 @@ mod tests {
         p.extra_transport = ExtraTransport::TorOnly;
         let args = p.as_args();
         assert!(!args.iter().any(|a| a == "--psiphon-region" || a == "--psiphon-mode"));
+    }
+
+    #[test]
+    fn psiphon_direct_emits_no_core_flags() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::PsiphonDirect;
+        p.psiphon_region = "DE".into();
+        p.psiphon_mode = PsiphonMode::Cdn;
+        let args = p.as_args();
+        // The direct console client is driven by its own module, never by
+        // core flags — not even region/mode.
+        assert!(!args.iter().any(|a| a == "--psiphon"
+            || a == "--psiphon-only"
+            || a == "--psiphon-region"
+            || a == "--psiphon-mode"));
+        assert!(args.iter().any(|a| a == "--http-proxy"));
     }
 
     #[test]

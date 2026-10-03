@@ -60,6 +60,14 @@ function addrsFromBind(bind: string): { socks: string; http: string } {
   return { socks: `${host}:${port}`, http: `${host}:${httpPort}` };
 }
 
+/** HTTP twin of a live "host:port" endpoint (port + 1). */
+function httpPortOf(addr: string): string {
+  const m = /^(.*):(\d+)\s*$/.exec(addr.trim());
+  if (!m) return addr;
+  const p = Number(m[2]);
+  return `${m[1]}:${p >= 65535 ? 1 : p + 1}`;
+}
+
 function Row({
   icon,
   label,
@@ -130,7 +138,14 @@ export function ConnectionInfo() {
   const autoFor = useRef(0);
 
   const connected = status.state === "Connected";
-  const { socks: socksAddr, http: httpAddr } = addrsFromBind(bind);
+  const fromBind = addrsFromBind(bind);
+  // While connected, trust the backend-reported endpoints (direct mode
+  // serves 11819/11820, not the profile ports); otherwise show what a
+  // connect will use. Inline state checks so TS narrows the union.
+  const socksAddr =
+    status.state === "Connected" ? status.socks_addr : fromBind.socks;
+  const httpAddr =
+    status.state === "Connected" ? httpPortOf(status.socks_addr) : fromBind.http;
 
   const fetchIp = useCallback(async () => {
     setIpLoading(true);

@@ -41,7 +41,7 @@ impl AetherManager {
     }
 }
 
-fn app_data_dir(app: &AppHandle) -> PathBuf {
+pub(crate) fn app_data_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
         .unwrap_or_else(|_| std::env::temp_dir())
@@ -564,6 +564,7 @@ pub fn submit_access_code(
 /// blocks briefly rather than spawning a thread, and skips emitting events
 /// nobody is left to receive.
 pub fn shutdown_blocking(manager: &Arc<Mutex<AetherManager>>, data_dir: &Path) {
+    crate::psiphon_direct::stop_silent();
 
     let mut mgr = manager.lock().unwrap();
     if let Some(session) = mgr.session.as_mut() {
