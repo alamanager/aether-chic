@@ -60,9 +60,30 @@ pub fn connect_timeout(scan_mode: &ScanMode) -> Duration {
 /// than any scan-mode timeout.
 pub const EXTRA_TRANSPORT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// One plain-HTTP fetch of api.ipify.org through the local HTTP proxy./// Proves the tunnel carries real traffic, not just an open port. std only;
-/// hostnames stay in the absolute-URI form so the proxy resolves them.
+/// Plain-HTTP targets for the usability probe, in order. api.ipify.org is
+/// first (tiny JSON body), www.example.com is the fallback: shared exits
+/// get rate-limited by single services (observed: ipify 429 on busy
+/// Psiphon exits), so one service must never be a single point of failure.
+const PROBE_TARGETS: &[(&str, &str, bool)] = &[
+    ("api.ipify.org", "/?format=json", true),
+    ("www.example.com", "/", false),
+];
+
+/// One plain-HTTP fetch through the local HTTP proxy. Proves the tunnel
+/// carries real traffic, not just an open port. std only; hostnames stay in
+/// the absolute-URI form so the proxy resolves them. The primary target
+/// needs a strict 200; the fallback accepts any 2xx/3xx — any well-formed
+/// HTTP reply through the tunnel means the tunnel works.
 fn probe_once(http: &SocketAddr) -> bool {
+    for (host, path, strict) in PROBE_TARGETS {
+        if probe_target(http, host, path, *strict) {
+            return true;
+        }
+    }
+    false
+}
+
+fn probe_target(http: &SocketAddr, host: &str, path: &str, strict: bool) -> bool {
     let mut s = match TcpStream::connect_timeout(http, Duration::from_secs(5)) {
         Ok(s) => s,
         Err(_) => return false,
@@ -70,11 +91,8 @@ fn probe_once(http: &SocketAddr) -> bool {
     if s.set_read_timeout(Some(Duration::from_secs(15))).is_err() {
         return false;
     }
-    if s.write_all(
-        b"GET http://api.ipify.org/?format=json HTTP/1.0\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n",
-    )
-    .is_err()
-    {
+    let req = format!("GET http://{host}{path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    if s.write_all(req.as_bytes()).is_err() {
         return false;
     }
     let mut buf = [0u8; 4096];
@@ -92,7 +110,19 @@ fn probe_once(http: &SocketAddr) -> bool {
         }
     }
     let head = String::from_utf8_lossy(&buf[..total]);
-    head.starts_with("HTTP/") && head.contains(" 200 ")
+    if !head.starts_with("HTTP/") {
+        return false;
+    }
+    if strict {
+        return head.contains(" 200 ");
+    }
+    // Fallback: any 2xx/3xx through the tunnel proves it carries traffic.
+    head.contains(" 200 ")
+        || head.contains(" 301 ")
+        || head.contains(" 302 ")
+        || head.contains(" 303 ")
+        || head.contains(" 307 ")
+        || head.contains(" 308 ")
 }
 
 /// Single traffic check for the Connected heartbeat: true when the tunnel

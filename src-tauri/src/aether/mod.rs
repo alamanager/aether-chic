@@ -117,6 +117,14 @@ pub fn start_connect(
         if status::port_is_live(&socks) {
             return Err(AetherError::PortInUse(socks.port()));
         }
+        // The core also binds its HTTP proxy (SOCKS port + 1, always passed
+        // since the v2.1.0 pin). A stale occupant there would leave SOCKS
+        // working while the usability probe — and the system proxy — talk
+        // to a dead port, i.e. "connected but nothing works".
+        let http = profiles::http_proxy_socket(&profile.bind_address);
+        if status::port_is_live(&http) {
+            return Err(AetherError::PortInUse(http.port()));
+        }
         mgr.state = ConnectionState::Launching;
         // A fresh user-initiated connect always gets a full retry budget,
         // independent of whatever happened on a previous, unrelated attempt.
