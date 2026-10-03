@@ -8,7 +8,7 @@
 //! no new states. Fixed ports (SOCKS 11819 / HTTP 11820) keep it separable
 //! from the core's 1819/1820.
 
-use crate::aether::profiles::ConnectionProfile;
+use crate::aether::profiles::{ConnectionProfile, PsiphonMode};
 use crate::error::AetherError;
 use crate::events::{now_millis, LogEvent, LOG_EVENT, STATUS_EVENT};
 use crate::state::ConnectionState;
@@ -136,8 +136,8 @@ fn write_config(
         map.insert("EgressRegion".into(), serde_json::Value::from(region));
     }
     // Same shape mapping Aether's own psiphon.rs uses.
-    match profile.psiphon_mode.as_str() {
-        "cdn" => {
+    match profile.psiphon_mode {
+        PsiphonMode::Cdn => {
             map.insert(
                 "LimitTunnelProtocols".into(),
                 serde_json::Value::from(
@@ -145,7 +145,7 @@ fn write_config(
                 ),
             );
         }
-        "direct" => {
+        PsiphonMode::Direct => {
             map.insert(
                 "LimitTunnelProtocols".into(),
                 serde_json::Value::from(
@@ -156,7 +156,7 @@ fn write_config(
                 ),
             );
         }
-        _ => {}
+        PsiphonMode::Auto => {}
     }
     let path = dir.join("psiphon-direct-config.json");
     std::fs::write(&path, serde_json::Value::from(map).to_string())
