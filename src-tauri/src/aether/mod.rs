@@ -1,4 +1,4 @@
-pub mod orphan;
+﻿pub mod orphan;
 pub mod profiles;
 pub mod prompts;
 pub mod pty;
@@ -121,7 +121,7 @@ pub fn start_connect(
         // since the v2.1.0 pin). A stale occupant there would leave SOCKS
         // working while the usability probe — and the system proxy — talk
         // to a dead port, i.e. "connected but nothing works".
-        let http = profiles::http_proxy_socket(&profile.bind_address);
+        let http = profiles::http_proxy_socket(&profile.bind_address, &profile.http_port);
         if status::port_is_live(&http) {
             return Err(AetherError::PortInUse(http.port()));
         }
@@ -321,7 +321,7 @@ fn monitor_connect(
             // usable (observed: Tor stuck at 15% fetching consensus, Psiphon
             // ~6s behind). Confirm real traffic flows before calling it
             // Connected — the probe sleeps, so the lock must go first.
-            let http = profiles::http_proxy_socket(&profile.bind_address);
+            let http = profiles::http_proxy_socket(&profile.bind_address, &profile.http_port);
             let needs_probe = profile.extra_transport != ExtraTransport::None;
             drop(mgr);
             if needs_probe
@@ -431,7 +431,7 @@ fn monitor_connected(
     data_dir: PathBuf,
     profile: ConnectionProfile,
 ) {
-    let http = profiles::http_proxy_socket(&profile.bind_address);
+    let http = profiles::http_proxy_socket(&profile.bind_address, &profile.http_port);
     let mut ticks: u32 = 0;
     let mut dead: u32 = 0;
     loop {

@@ -176,8 +176,8 @@ export function SettingsTab() {
           <NoizeProfileToggle />
         </FieldRow>
         <FieldRow
-          label="SOCKS5 Proxy"
-          tooltip="The local address Aether's SOCKS5 proxy listens on. Change the port to avoid conflicts, or enable LAN to share the tunnel with other devices on your network."
+          label="Local endpoints (share)"
+          tooltip="SOCKS5 port plus a separate HTTP port (empty = SOCKS+1, served natively by the core). LAN share opens BOTH endpoints to your network with no password — only for networks you trust."
         >
           <BindAddressField />
         </FieldRow>

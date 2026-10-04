@@ -108,6 +108,10 @@ pub fn spawn(
         "AETHER_MASQUE_HTTP2",
         if profile.masque_http2 { "1" } else { "0" },
     );
+    // Transfer counters for the GUI speed card: cheap atomics, reported as
+    // "[=] up … down … uptime …" lines every couple of seconds.
+    cmd.env("AETHER_STATS", "1");
+    cmd.env("AETHER_STATS_SECS", "2");
     // Keep Access credentials out of the process command line. Aether's
     // flags and environment variables are equivalent, but command arguments
     // are trivially visible to other local processes on several platforms.

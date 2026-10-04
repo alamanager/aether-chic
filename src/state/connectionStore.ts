@@ -27,6 +27,9 @@ interface ConnectionState {
    * in flushLogs so status text can subscribe to one number instead of the
    * whole log array (which re-renders every 100ms during scans). */
   torPercent: number | null;
+  /** Live transfer counters + per-second rates (null until the first
+   * stats line arrives). Reset on every fresh attempt. */
+  traffic: { up: number; down: number; upRate: number; downRate: number; at: number } | null;
   /** Monotonic key for controls that must reset between explicit connects. */
   attemptId: number;
   connect: () => Promise<void>;
@@ -39,6 +42,7 @@ interface ConnectionState {
   setMasqueNoize: (masque_noize: MasqueNoize) => void;
   setWgNoize: (wg_noize: WgNoize) => void;
   setBindAddress: (bind_address: string) => void;
+  setHttpPort: (http_port: string) => void;
   setDns: (dns: string) => void;
   setZeroTrustTeam: (zero_trust_team: string) => void;
   setZeroTrustAuth: (zero_trust_auth: ZeroTrustAuth) => void;
@@ -70,6 +74,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     masque_noize: "firewall",
     wg_noize: "balanced",
     bind_address: "127.0.0.1:1819",
+    http_port: "",
     dns: "",
     zero_trust_team: "",
     zero_trust_auth: "email",
@@ -91,12 +96,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   sidecarError: null,
   scanBudgetSecs: null,
   torPercent: null,
+  traffic: null,
   attemptId: 0,
 
   connect: async () => {
     // A fresh user-initiated attempt should not inherit stale log-driven UI
     // prompts (notably a previous Zero Trust email-code request).
-    set((s) => ({ logs: [], scanBudgetSecs: null, torPercent: null, attemptId: s.attemptId + 1 }));
+    set((s) => ({ logs: [], scanBudgetSecs: null, torPercent: null, traffic: null, attemptId: s.attemptId + 1 }));
     try {
       await invoke("connect", { profileOverride: get().profile });
     } catch (e) {
@@ -145,6 +151,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   setBindAddress: (bind_address) =>
     set((s) => ({ profile: { ...s.profile, bind_address } })),
+
+  setHttpPort: (http_port) =>
+    set((s) => ({ profile: { ...s.profile, http_port } })),
 
   setDns: (dns) => set((s) => ({ profile: { ...s.profile, dns } })),
 
@@ -220,6 +229,18 @@ if (import.meta.env.DEV) {
 
 const BUDGET_RE = /budget=(\d+)s/;
 const TOR_PCT_RE = /reaching the network:\s*(\d+)%/;
+// Core stats line: "[=] up 1.2 MiB down 34.5 MiB uptime 00:05:00"
+const STATS_RE = /\[=\] up ([\d.]+) (\w+) down ([\d.]+) (\w+)/;
+
+function toBytes(value: number, unit: string): number {
+  switch (unit) {
+    case "KiB": return value * 1024;
+    case "MiB": return value * 1024 * 1024;
+    case "GiB": return value * 1024 * 1024 * 1024;
+    case "TiB": return value * 1024 * 1024 * 1024 * 1024;
+    default: return value;
+  }
+}
 
 /** Call once from App's top-level effect; returns a cleanup function. */
 export async function initConnectionListeners(): Promise<() => void> {
@@ -234,16 +255,39 @@ export async function initConnectionListeners(): Promise<() => void> {
     pendingLogs = [];
     let budget: number | null = null;
     let tor: number | null = null;
+    let statUp: number | null = null;
+    let statDown: number | null = null;
     for (const l of batch) {
       const m = BUDGET_RE.exec(l.line);
       if (m) budget = Number(m[1]);
       const t = TOR_PCT_RE.exec(l.line);
       if (t) tor = Number(t[1]);
+      const s = STATS_RE.exec(l.line);
+      if (s) {
+        statUp = toBytes(Number(s[1]), s[2]);
+        statDown = toBytes(Number(s[3]), s[4]);
+      }
+    }
+    // Per-second rates from the delta since the previous stats line. The
+    // core reports every ~2s (AETHER_STATS_SECS), so divide by wall time.
+    let traffic: ConnectionState["traffic"] = null;
+    if (statUp !== null && statDown !== null) {
+      const prev = useConnectionStore.getState().traffic;
+      const now = Date.now();
+      const dt = prev && prev.at > 0 ? Math.max(1, (now - prev.at) / 1000) : 2;
+      traffic = {
+        up: statUp,
+        down: statDown,
+        upRate: Math.max(0, (statUp - (prev?.up ?? 0)) / dt),
+        downRate: Math.max(0, (statDown - (prev?.down ?? 0)) / dt),
+        at: now,
+      };
     }
     useConnectionStore.setState((s) => ({
       logs: [...s.logs, ...batch].slice(-MAX_LOG_LINES),
       ...(budget !== null ? { scanBudgetSecs: budget } : {}),
       ...(tor !== null ? { torPercent: tor } : {}),
+      ...(traffic !== null ? { traffic } : {}),
     }));
   };
 
@@ -251,8 +295,8 @@ export async function initConnectionListeners(): Promise<() => void> {
     listen<ConnectionStatus>("aether://status", (e) => {
       useConnectionStore.setState({
         status: e.payload,
-        // Fresh attempt — last attempt's budget/percent no longer apply.
-        ...(e.payload.state === "Launching" ? { scanBudgetSecs: null, torPercent: null } : {}),
+        // Fresh attempt — last attempt's budget/percent/counters reset.
+        ...(e.payload.state === "Launching" ? { scanBudgetSecs: null, torPercent: null, traffic: null } : {}),
       });
     }),
     listen<LogLine>("aether://log", (e) => {

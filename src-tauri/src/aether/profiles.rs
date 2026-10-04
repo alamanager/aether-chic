@@ -133,6 +133,10 @@ pub struct ConnectionProfile {    pub protocol: Protocol,
     /// 127.0.0.1:1819; users can change the port or bind to 0.0.0.0 for LAN.
     #[serde(default = "default_bind_address")]
     pub bind_address: String,
+    /// Custom HTTP proxy port (empty = SOCKS port + 1). Same IP as --bind,
+    /// so LAN sharing covers both endpoints at once.
+    #[serde(default)]
+    pub http_port: String,
     /// Aether ≥1.5.0: optional resolvers used *inside* the tunnel. Kept as
     /// Aether's comma-separated CLI format, for example `1.1.1.1,1.0.0.1`.
     #[serde(default)]
@@ -279,20 +283,32 @@ fn default_bind_address() -> String {
     "127.0.0.1:1819".into()
 }
 
-/// HTTP endpoint served by the core next to SOCKS5: same IP, port + 1.
-/// Falls back to 127.0.0.1:1820 when the bind address doesn't parse.
-pub fn http_proxy_addr(bind_address: &str) -> String {
-    http_proxy_socket(bind_address).to_string()
+/// HTTP endpoint served by the core next to SOCKS5: same IP, custom port
+/// when set and sane, else SOCKS port + 1. Falls back to 127.0.0.1:1820
+/// when the bind address doesn't parse.
+pub fn http_proxy_addr(bind_address: &str, http_port: &str) -> String {
+    http_proxy_socket(bind_address, http_port).to_string()
 }
 
 /// Socket version of the above. An unspecified (0.0.0.0) bind maps to
 /// loopback — see status::client_addr — because 0.0.0.0 is not connectable
 /// and must never be reported to clients or the system proxy.
-pub fn http_proxy_socket(bind_address: &str) -> std::net::SocketAddr {
+pub fn http_proxy_socket(bind_address: &str, http_port: &str) -> std::net::SocketAddr {
     match bind_address.parse::<std::net::SocketAddr>() {
         Ok(socks) => {
             let mut http = super::status::client_addr(&socks);
+            // A custom port wins unless it is invalid or collides with the
+            // SOCKS port itself (the core could never bind both).
+            if let Ok(p) = http_port.trim().parse::<u16>() {
+                if p >= 1 && p != socks.port() {
+                    http.set_port(p);
+                    return http;
+                }
+            }
             http.set_port(socks.port().wrapping_add(1));
+            if http.port() == 0 {
+                http.set_port(1820);
+            }
             http
         }
         Err(_) => "127.0.0.1:1820"
@@ -351,8 +367,8 @@ impl ConnectionProfile {
         }
         // Aether ≥1.6.0 serves a native HTTP CONNECT proxy next to SOCKS5 —
         // this replaced the GUI's old hand-rolled bridge. Always on, on its
-        // own port (SOCKS port + 1) so the two stay separable in the UI.
-        let http_addr = http_proxy_addr(&self.bind_address);
+        // own port (custom or SOCKS port + 1) so the two stay separable.
+        let http_addr = http_proxy_addr(&self.bind_address, &self.http_port);
         args.push("--http-proxy".into());
         args.push(http_addr);
         if !self.upstream.trim().is_empty() {
@@ -554,13 +570,26 @@ mod tests {
 
     #[test]
     fn http_proxy_follows_socks_port() {
-        assert_eq!(http_proxy_addr("127.0.0.1:1819"), "127.0.0.1:1820");
-        assert_eq!(http_proxy_addr("0.0.0.0:1919"), "127.0.0.1:1920");
-        assert_eq!(http_proxy_addr("garbage"), "127.0.0.1:1820");
+        assert_eq!(http_proxy_addr("127.0.0.1:1819", ""), "127.0.0.1:1820");
+        assert_eq!(http_proxy_addr("0.0.0.0:1919", ""), "127.0.0.1:1920");
+        assert_eq!(http_proxy_addr("garbage", ""), "127.0.0.1:1820");
         let p = ConnectionProfile::default();
         let args = p.as_args();
         let i = args.iter().position(|a| a == "--http-proxy").expect("missing --http-proxy");
         assert_eq!(args.get(i + 1).map(String::as_str), Some("127.0.0.1:1820"));
+    }
+
+    #[test]
+    fn custom_http_port_wins_unless_colliding() {
+        assert_eq!(http_proxy_addr("127.0.0.1:1819", "8080"), "127.0.0.1:8080");
+        // Same as SOCKS or invalid → falls back to SOCKS+1.
+        assert_eq!(http_proxy_addr("127.0.0.1:1819", "1819"), "127.0.0.1:1820");
+        assert_eq!(http_proxy_addr("127.0.0.1:1819", "abc"), "127.0.0.1:1820");
+        let mut p = ConnectionProfile::default();
+        p.http_port = "18080".into();
+        let args = p.as_args();
+        let i = args.iter().position(|a| a == "--http-proxy").expect("missing --http-proxy");
+        assert_eq!(args.get(i + 1).map(String::as_str), Some("127.0.0.1:18080"));
     }
 
     #[test]
@@ -654,6 +683,7 @@ impl Default for ConnectionProfile {
             masque_noize: MasqueNoize::Firewall,
             wg_noize: WgNoize::Balanced,
             bind_address: default_bind_address(),
+            http_port: String::new(),
             dns: String::new(),
             zero_trust_team: String::new(),
             zero_trust_auth: ZeroTrustAuth::Email,
