@@ -150,6 +150,13 @@ fn proxy_bypass() -> String {
     parts.join(";")
 }
 
+#[cfg(not(windows))]
+fn refresh() {
+    // No live refresh primitive is used off Windows yet (macOS/GNOME paths
+    // go through their own helpers) — kept as a no-op so shared callers
+    // compile on every target.
+}
+
 #[cfg(windows)]
 fn refresh() {
     use windows_sys::Win32::Networking::WinInet::{
