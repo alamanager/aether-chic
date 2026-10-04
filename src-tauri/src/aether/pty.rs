@@ -112,6 +112,23 @@ pub fn spawn(
     // "[=] up … down … uptime …" lines every couple of seconds.
     cmd.env("AETHER_STATS", "1");
     cmd.env("AETHER_STATS_SECS", "2");
+    // Optional v2.2 tuning knobs (empty = core defaults; route sniffing and
+    // the QUIC v2 opener stay on unless explicitly disabled).
+    for (key, val) in [
+        ("AETHER_MASQUE_MTU", profile.masque_mtu.trim()),
+        ("AETHER_NETSTACK_TCP_RX", profile.netstack_rx.trim()),
+        ("AETHER_NETSTACK_TCP_TX", profile.netstack_tx.trim()),
+    ] {
+        if !val.is_empty() {
+            cmd.env(key, val);
+        }
+    }
+    if !profile.route_sniff {
+        cmd.env("AETHER_ROUTE_SNIFF", "0");
+    }
+    if profile.no_quic_v2 {
+        cmd.env("AETHER_QUIC_V2", "0");
+    }
     // Keep Access credentials out of the process command line. Aether's
     // flags and environment variables are equivalent, but command arguments
     // are trivially visible to other local processes on several platforms.

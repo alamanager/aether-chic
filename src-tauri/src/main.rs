@@ -25,6 +25,9 @@ fn main() {
             // the user can click Connect and spawn a second one onto the
             // same port.
             aether::orphan::reap_orphan(&data_dir);
+            // Undo a system proxy a crashed run left behind, so a dead
+            // proxy never strands the user without internet.
+            crate::sysproxy::restore_stale(&app.handle());
             focus::spawn_watcher(app.handle().clone());
             tray::init(app)?;
             Ok(())

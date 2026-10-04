@@ -10,11 +10,10 @@ export type ConnectionStatus =
   | { state: "Disconnecting" }
   | { state: "Error"; message: string; phase: string };
 
-export type Protocol = "auto" | "masque" | "wireguard" | "gool";
-export type ScanMode = "turbo" | "balanced" | "thorough" | "stealth" | "ironclad";
+export type Protocol = "auto" | "masque" | "wireguard" | "gool" | "gool_classic" | "mim";
+export type ScanMode = "turbo" | "balanced" | "thorough" | "verified" | "ironclad";
 export type IpVersion = "v4" | "v6" | "both";
-export type MasqueNoize = "firewall" | "gfw" | "off";
-export type WgNoize = "balanced" | "aggressive" | "light" | "off";
+export type Noize = "off" | "light" | "firewall" | "balanced" | "gfw" | "aggressive";
 export type ZeroTrustAuth = "email" | "service" | "token";
 export type ExtraTransport =
   | "none"
@@ -36,10 +35,8 @@ export interface ConnectionProfile {
   /** Aether ≥1.2.0: run MASQUE over HTTP/2 (TCP) instead of the default
    * HTTP/3 (QUIC) — for networks that block or throttle UDP. */
   masque_http2: boolean;
-  /** Obfuscation profile for MASQUE (firewall/gfw/off). */
-  masque_noize: MasqueNoize;
-  /** Obfuscation profile for WireGuard/gool (balanced/aggressive/light/off). */
-  wg_noize: WgNoize;
+  /** Unified obfuscation profile (v2.2 one list for every protocol). */
+  noize: Noize;
   /** Local SOCKS5 listen address (--bind). Default 127.0.0.1:1819. */
   bind_address: string;
   /** Custom HTTP proxy port (empty = SOCKS port + 1). */
@@ -68,6 +65,49 @@ export interface ConnectionProfile {
   psiphon_region: string;
   /** Psiphon shape: automatic / fronted-meek-only / direct. */
   psiphon_mode: "auto" | "cdn" | "direct";
+  /** v2.2 forced peers (empty = scan). */
+  peer: string;
+  wg_peer: string;
+  gool_peer: string;
+  wiw_outer: string;
+  wiw_inner: string;
+  mim_outer: string;
+  mim_inner: string;
+  /** v2.2 exit-country enforcement, e.g. "!IR,AZ,RU" (empty = off). */
+  exit_loc: string;
+  /** v2.2 MASQUE/TLS toggles. */
+  api_fragment: boolean;
+  no_quic_v2: boolean;
+  h2_peer: string;
+  no_data_check: boolean;
+  no_profile_retry: boolean;
+  keepalive: string;
+  perf: string;
+  /** v2.2 ECH ("" = off, "auto" or base64 key) + lookup knobs. */
+  ech: string;
+  ech_dns: string;
+  ech_domain: string;
+  /** v2.2 TLS fingerprint (empty = Chrome defaults). */
+  tls_ciphers: string;
+  tls_groups: string;
+  disable_grease: boolean;
+  /** v2.2 tuning env knobs (empty = core defaults). */
+  masque_mtu: string;
+  netstack_rx: string;
+  netstack_tx: string;
+  route_sniff: boolean;
+  /** v2.2 Tor extras. */
+  tor_relays: string;
+  tor_bridge: string;
+  tor_bridge_file: string;
+  tor_bind: string;
+  /** v2.2 Psiphon extras. */
+  psiphon_config: string;
+  psiphon_cdn_ips: string;
+  psiphon_cdn_sni: string;
+  psiphon_cdn_sets: string;
+  psiphon_server_entries: string;
+  psiphon_bind: string;
   route_direct: string;
   routes_file: string;
 }

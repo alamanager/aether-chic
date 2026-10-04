@@ -1,11 +1,32 @@
 import { useEffect, useRef, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Copy, Check, Trash2 } from "lucide-react";
 import { useConnectionStore } from "@/state/connectionStore";
+
+function CopyButton({ logs }: { logs: { line: string }[] }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard
+          ?.writeText(logs.map((l) => l.line).join("\n"))
+          .then(() => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1500);
+          })
+          .catch(() => {});
+      }}
+      aria-label="Copy logs"
+      className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
+    >
+      {done ? <Check className="size-3.5 text-status-connected" /> : <Copy className="size-3.5" />}
+    </button>
+  );
+}
 
 /**
  * Dedicated log view: the raw core output stream with autoscroll that
- * yields to manual scrolling, plus a clear button. Previously buried at the
- * bottom of the Advanced panel.
+ * yields to manual scrolling, plus copy and clear actions.
  */
 export function LogsTab() {
   const logs = useConnectionStore((s) => s.logs);
@@ -25,14 +46,17 @@ export function LogsTab() {
         <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
           Core output · {logs.length} lines
         </span>
-        <button
-          type="button"
-          onClick={clearLogs}
-          aria-label="Clear logs"
-          className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        <span className="flex items-center gap-1">
+          <CopyButton logs={logs} />
+          <button
+            type="button"
+            onClick={clearLogs}
+            aria-label="Clear logs"
+            className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </span>
       </div>
       <div
         ref={viewportRef}

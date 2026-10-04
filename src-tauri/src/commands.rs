@@ -75,6 +75,6 @@ pub fn get_system_proxy() -> Result<bool, AetherError> {
 }
 
 #[tauri::command]
-pub fn set_system_proxy(enabled: bool, server: String) -> Result<(), AetherError> {
-    crate::sysproxy::set(enabled, &server).map_err(AetherError::Internal)
+pub fn set_system_proxy(app: AppHandle, enabled: bool, server: String) -> Result<(), AetherError> {
+    crate::sysproxy::set(&app, enabled, &server).map_err(AetherError::Internal)
 }

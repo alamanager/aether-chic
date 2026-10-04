@@ -6,8 +6,7 @@ import type {
   ConnectionStatus,
   ExtraTransport,
   LogLine,
-  MasqueNoize,
-  WgNoize,
+  Noize,
   ZeroTrustAuth,
 } from "@/types/connection";
 
@@ -42,8 +41,7 @@ interface ConnectionState {
   setIpVersion: (ip_version: ConnectionProfile["ip_version"]) => void;
   setQuickReconnect: (quick_reconnect: boolean) => void;
   setMasqueHttp2: (masque_http2: boolean) => void;
-  setMasqueNoize: (masque_noize: MasqueNoize) => void;
-  setWgNoize: (wg_noize: WgNoize) => void;
+  setNoize: (noize: Noize) => void;
   setBindAddress: (bind_address: string) => void;
   setHttpPort: (http_port: string) => void;
   setDns: (dns: string) => void;
@@ -62,6 +60,41 @@ interface ConnectionState {
   setTorBridges: (tor_bridges: boolean) => void;
   setPsiphonRegion: (psiphon_region: string) => void;
   setPsiphonMode: (psiphon_mode: ConnectionProfile["psiphon_mode"]) => void;
+  setPeer: (peer: string) => void;
+  setWgPeer: (wg_peer: string) => void;
+  setGoolPeer: (gool_peer: string) => void;
+  setWiwOuter: (wiw_outer: string) => void;
+  setWiwInner: (wiw_inner: string) => void;
+  setMimOuter: (mim_outer: string) => void;
+  setMimInner: (mim_inner: string) => void;
+  setExitLoc: (exit_loc: string) => void;
+  setApiFragment: (api_fragment: boolean) => void;
+  setNoQuicV2: (no_quic_v2: boolean) => void;
+  setH2Peer: (h2_peer: string) => void;
+  setNoDataCheck: (no_data_check: boolean) => void;
+  setNoProfileRetry: (no_profile_retry: boolean) => void;
+  setKeepalive: (keepalive: string) => void;
+  setPerf: (perf: string) => void;
+  setEch: (ech: string) => void;
+  setEchDns: (ech_dns: string) => void;
+  setEchDomain: (ech_domain: string) => void;
+  setTlsCiphers: (tls_ciphers: string) => void;
+  setTlsGroups: (tls_groups: string) => void;
+  setDisableGrease: (disable_grease: boolean) => void;
+  setMasqueMtu: (masque_mtu: string) => void;
+  setNetstackRx: (netstack_rx: string) => void;
+  setNetstackTx: (netstack_tx: string) => void;
+  setRouteSniff: (route_sniff: boolean) => void;
+  setTorRelays: (tor_relays: string) => void;
+  setTorBridge: (tor_bridge: string) => void;
+  setTorBridgeFile: (tor_bridge_file: string) => void;
+  setTorBind: (tor_bind: string) => void;
+  setPsiphonConfig: (psiphon_config: string) => void;
+  setPsiphonCdnIps: (psiphon_cdn_ips: string) => void;
+  setPsiphonCdnSni: (psiphon_cdn_sni: string) => void;
+  setPsiphonCdnSets: (psiphon_cdn_sets: string) => void;
+  setPsiphonServerEntries: (psiphon_server_entries: string) => void;
+  setPsiphonBind: (psiphon_bind: string) => void;
   clearLogs: () => void;
   retryAfterSidecarError: () => void;
 }
@@ -74,8 +107,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     ip_version: "v4",
     quick_reconnect: true,
     masque_http2: false,
-    masque_noize: "firewall",
-    wg_noize: "balanced",
+    noize: "firewall",
     bind_address: "127.0.0.1:1819",
     http_port: "",
     dns: "",
@@ -94,6 +126,41 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     tor_bridges: false,
     psiphon_region: "",
     psiphon_mode: "auto",
+    peer: "",
+    wg_peer: "",
+    gool_peer: "",
+    wiw_outer: "",
+    wiw_inner: "",
+    mim_outer: "",
+    mim_inner: "",
+    exit_loc: "",
+    api_fragment: false,
+    no_quic_v2: false,
+    h2_peer: "",
+    no_data_check: false,
+    no_profile_retry: false,
+    keepalive: "",
+    perf: "",
+    ech: "",
+    ech_dns: "",
+    ech_domain: "",
+    tls_ciphers: "",
+    tls_groups: "",
+    disable_grease: false,
+    masque_mtu: "",
+    netstack_rx: "",
+    netstack_tx: "",
+    route_sniff: true,
+    tor_relays: "",
+    tor_bridge: "",
+    tor_bridge_file: "",
+    tor_bind: "",
+    psiphon_config: "",
+    psiphon_cdn_ips: "",
+    psiphon_cdn_sni: "",
+    psiphon_cdn_sets: "",
+    psiphon_server_entries: "",
+    psiphon_bind: "",
   },
   logs: [],
   sidecarError: null,
@@ -147,11 +214,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setMasqueHttp2: (masque_http2) =>
     set((s) => ({ profile: { ...s.profile, masque_http2 } })),
 
-  setMasqueNoize: (masque_noize) =>
-    set((s) => ({ profile: { ...s.profile, masque_noize } })),
-
-  setWgNoize: (wg_noize) =>
-    set((s) => ({ profile: { ...s.profile, wg_noize } })),
+  setNoize: (noize) =>
+    set((s) => ({ profile: { ...s.profile, noize } })),
 
   setBindAddress: (bind_address) =>
     set((s) => ({ profile: { ...s.profile, bind_address } })),
@@ -214,6 +278,50 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   setPsiphonMode: (psiphon_mode) =>
     set((s) => ({ profile: { ...s.profile, psiphon_mode } })),
+
+  setPeer: (peer) => set((s) => ({ profile: { ...s.profile, peer } })),
+  setWgPeer: (wg_peer) => set((s) => ({ profile: { ...s.profile, wg_peer } })),
+  setGoolPeer: (gool_peer) => set((s) => ({ profile: { ...s.profile, gool_peer } })),
+  setWiwOuter: (wiw_outer) => set((s) => ({ profile: { ...s.profile, wiw_outer } })),
+  setWiwInner: (wiw_inner) => set((s) => ({ profile: { ...s.profile, wiw_inner } })),
+  setMimOuter: (mim_outer) => set((s) => ({ profile: { ...s.profile, mim_outer } })),
+  setMimInner: (mim_inner) => set((s) => ({ profile: { ...s.profile, mim_inner } })),
+  setExitLoc: (exit_loc) => set((s) => ({ profile: { ...s.profile, exit_loc } })),
+  setApiFragment: (api_fragment) => set((s) => ({ profile: { ...s.profile, api_fragment } })),
+  setNoQuicV2: (no_quic_v2) => set((s) => ({ profile: { ...s.profile, no_quic_v2 } })),
+  setH2Peer: (h2_peer) => set((s) => ({ profile: { ...s.profile, h2_peer } })),
+  setNoDataCheck: (no_data_check) => set((s) => ({ profile: { ...s.profile, no_data_check } })),
+  setNoProfileRetry: (no_profile_retry) =>
+    set((s) => ({ profile: { ...s.profile, no_profile_retry } })),
+  setKeepalive: (keepalive) => set((s) => ({ profile: { ...s.profile, keepalive } })),
+  setPerf: (perf) => set((s) => ({ profile: { ...s.profile, perf } })),
+  setEch: (ech) => set((s) => ({ profile: { ...s.profile, ech } })),
+  setEchDns: (ech_dns) => set((s) => ({ profile: { ...s.profile, ech_dns } })),
+  setEchDomain: (ech_domain) => set((s) => ({ profile: { ...s.profile, ech_domain } })),
+  setTlsCiphers: (tls_ciphers) => set((s) => ({ profile: { ...s.profile, tls_ciphers } })),
+  setTlsGroups: (tls_groups) => set((s) => ({ profile: { ...s.profile, tls_groups } })),
+  setDisableGrease: (disable_grease) =>
+    set((s) => ({ profile: { ...s.profile, disable_grease } })),
+  setMasqueMtu: (masque_mtu) => set((s) => ({ profile: { ...s.profile, masque_mtu } })),
+  setNetstackRx: (netstack_rx) => set((s) => ({ profile: { ...s.profile, netstack_rx } })),
+  setNetstackTx: (netstack_tx) => set((s) => ({ profile: { ...s.profile, netstack_tx } })),
+  setRouteSniff: (route_sniff) => set((s) => ({ profile: { ...s.profile, route_sniff } })),
+  setTorRelays: (tor_relays) => set((s) => ({ profile: { ...s.profile, tor_relays } })),
+  setTorBridge: (tor_bridge) => set((s) => ({ profile: { ...s.profile, tor_bridge } })),
+  setTorBridgeFile: (tor_bridge_file) =>
+    set((s) => ({ profile: { ...s.profile, tor_bridge_file } })),
+  setTorBind: (tor_bind) => set((s) => ({ profile: { ...s.profile, tor_bind } })),
+  setPsiphonConfig: (psiphon_config) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_config } })),
+  setPsiphonCdnIps: (psiphon_cdn_ips) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_cdn_ips } })),
+  setPsiphonCdnSni: (psiphon_cdn_sni) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_cdn_sni } })),
+  setPsiphonCdnSets: (psiphon_cdn_sets) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_cdn_sets } })),
+  setPsiphonServerEntries: (psiphon_server_entries) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_server_entries } })),
+  setPsiphonBind: (psiphon_bind) => set((s) => ({ profile: { ...s.profile, psiphon_bind } })),
 
   clearLogs: () => set({ logs: [] }),
 

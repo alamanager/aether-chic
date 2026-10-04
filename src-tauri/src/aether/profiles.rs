@@ -11,15 +11,19 @@ pub enum Protocol {
     Masque,
     Wireguard,
     Gool,
+    GoolClassic,
+    Mim,
 }
 
 impl Protocol {
     /// The literal menu choice Aether expects at its "Protocol:" prompt.
+    /// GoolClassic/Mim map to "3" by analogy only (v2.2 menu order
+    /// unverified) — a pure fallback, since flags suppress menus anyway.
     pub fn as_menu_choice(&self) -> &'static str {
         match self {
             Protocol::Auto | Protocol::Masque => "1",
             Protocol::Wireguard => "2",
-            Protocol::Gool => "3",
+            Protocol::Gool | Protocol::GoolClassic | Protocol::Mim => "3",
         }
     }
 }
@@ -30,7 +34,7 @@ pub enum ScanMode {
     Turbo,
     Balanced,
     Thorough,
-    Stealth,
+    Verified,
     Ironclad,
 }
 
@@ -40,7 +44,7 @@ impl ScanMode {
             ScanMode::Turbo => "1",
             ScanMode::Balanced => "2",
             ScanMode::Thorough => "3",
-            ScanMode::Stealth => "4",
+            ScanMode::Verified => "4",
             ScanMode::Ironclad => "5",
         }
     }
@@ -64,43 +68,30 @@ impl IpVersion {
     }
 }
 
-/// Obfuscation profile for MASQUE connections. The profile shapes how much
-/// junk/padding Aether injects to disguise the handshake from DPI.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+/// Obfuscation profile, one list for every protocol since core v2.2
+/// (`off | light | firewall | balanced | gfw | aggressive`; firewall is
+/// the MASQUE default, balanced for the rest). Passed as `--noize`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum MasqueNoize {
-    Firewall,
-    Gfw,
+pub enum Noize {
     Off,
-}
-
-impl MasqueNoize {
-    pub fn as_flag(&self) -> &'static str {
-        match self {
-            MasqueNoize::Firewall => "firewall",
-            MasqueNoize::Gfw => "gfw",
-            MasqueNoize::Off => "off",
-        }
-    }
-}
-
-/// Obfuscation profile for WireGuard and gool connections.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum WgNoize {
-    Balanced,
-    Aggressive,
     Light,
-    Off,
+    #[default]
+    Firewall,
+    Balanced,
+    Gfw,
+    Aggressive,
 }
 
-impl WgNoize {
+impl Noize {
     pub fn as_flag(&self) -> &'static str {
         match self {
-            WgNoize::Balanced => "balanced",
-            WgNoize::Aggressive => "aggressive",
-            WgNoize::Light => "light",
-            WgNoize::Off => "off",
+            Noize::Off => "off",
+            Noize::Light => "light",
+            Noize::Firewall => "firewall",
+            Noize::Balanced => "balanced",
+            Noize::Gfw => "gfw",
+            Noize::Aggressive => "aggressive",
         }
     }
 }
@@ -121,14 +112,10 @@ pub struct ConnectionProfile {    pub protocol: Protocol,
     /// new interactive "MASQUE transport" prompt in both directions.
     #[serde(default)]
     pub masque_http2: bool,
-    /// Obfuscation profile for MASQUE (firewall/gfw/off). Passed as
-    /// `--noize <value>`. Only sent when the active protocol is MASQUE-based.
-    #[serde(default = "default_masque_noize")]
-    pub masque_noize: MasqueNoize,
-    /// Obfuscation profile for WireGuard/gool (balanced/aggressive/light/off).
-    /// Only sent when the active protocol is WireGuard or gool.
-    #[serde(default = "default_wg_noize")]
-    pub wg_noize: WgNoize,
+    /// Unified obfuscation profile since core v2.2 (one list for every
+    /// protocol). Passed as `--noize <value>`.
+    #[serde(default)]
+    pub noize: Noize,
     /// Local SOCKS5 listen address (`--bind`). Aether defaults to
     /// 127.0.0.1:1819; users can change the port or bind to 0.0.0.0 for LAN.
     #[serde(default = "default_bind_address")]
@@ -175,6 +162,90 @@ pub struct ConnectionProfile {    pub protocol: Protocol,
     /// Optional path to an Aether routing file with [block]/[direct] sections.
     #[serde(default)]
     pub routes_file: String,
+    /// v2.2 forced peers (skip scanning for named hops): MASQUE/WireGuard
+    /// peer, WireGuard peer (warp-in-warp outer), gool inner peer.
+    #[serde(default)]
+    pub peer: String,
+    #[serde(default)]
+    pub wg_peer: String,
+    #[serde(default)]
+    pub gool_peer: String,
+    /// v2.2 classic-gool / mim manual endpoints (port required).
+    #[serde(default)]
+    pub wiw_outer: String,
+    #[serde(default)]
+    pub wiw_inner: String,
+    #[serde(default)]
+    pub mim_outer: String,
+    #[serde(default)]
+    pub mim_inner: String,
+    /// v2.2 exit-country enforcement, e.g. "!IR,AZ,RU" or "DE,SE". Empty = off.
+    #[serde(default)]
+    pub exit_loc: String,
+    /// v2.2 flags: fragment the API route, skip QUIC v2 opener, H2 peer,
+    /// skip data-plane validation, profile retry, keepalive, perf profile.
+    #[serde(default)]
+    pub api_fragment: bool,
+    #[serde(default)]
+    pub no_quic_v2: bool,
+    #[serde(default)]
+    pub h2_peer: String,
+    #[serde(default)]
+    pub no_data_check: bool,
+    #[serde(default)]
+    pub no_profile_retry: bool,
+    #[serde(default)]
+    pub keepalive: String,
+    #[serde(default)]
+    pub perf: String,
+    /// v2.2 ECH (empty = off, "auto" or base64 key) plus its lookup knobs.
+    #[serde(default)]
+    pub ech: String,
+    #[serde(default)]
+    pub ech_dns: String,
+    #[serde(default)]
+    pub ech_domain: String,
+    /// v2.2 TLS fingerprint controls (empty = Chrome defaults).
+    #[serde(default)]
+    pub tls_ciphers: String,
+    #[serde(default)]
+    pub tls_groups: String,
+    #[serde(default)]
+    pub disable_grease: bool,
+    /// v2.2 tuning env knobs (empty = core defaults): inner MTU, netstack
+    /// TCP buffers, SNI sniffing (route_sniff off writes AETHER_ROUTE_SNIFF=0).
+    #[serde(default)]
+    pub masque_mtu: String,
+    #[serde(default)]
+    pub netstack_rx: String,
+    #[serde(default)]
+    pub netstack_tx: String,
+    #[serde(default = "default_true")]
+    pub route_sniff: bool,
+    /// v2.2 Tor extras: relays mode (auto/only/off/count), custom bridge
+    /// lines (one per line), bridge file, and the Tor exit listener.
+    #[serde(default)]
+    pub tor_relays: String,
+    #[serde(default)]
+    pub tor_bridge: String,
+    #[serde(default)]
+    pub tor_bridge_file: String,
+    #[serde(default)]
+    pub tor_bind: String,
+    /// v2.2 Psiphon extras: custom config overlay, CDN fronting lists,
+    /// seed server entries, and the Psiphon exit listener.
+    #[serde(default)]
+    pub psiphon_config: String,
+    #[serde(default)]
+    pub psiphon_cdn_ips: String,
+    #[serde(default)]
+    pub psiphon_cdn_sni: String,
+    #[serde(default)]
+    pub psiphon_cdn_sets: String,
+    #[serde(default)]
+    pub psiphon_server_entries: String,
+    #[serde(default)]
+    pub psiphon_bind: String,
     /// Aether ≥1.7.0: dial out through another proxy (chain behind a VPN or
     /// proxy app already on the machine). Accepts socks5://, http:// or a
     /// bare host:port (SOCKS5), with credentials in the URL.
@@ -271,14 +342,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_masque_noize() -> MasqueNoize {
-    MasqueNoize::Firewall
-}
-
-fn default_wg_noize() -> WgNoize {
-    WgNoize::Balanced
-}
-
 fn default_bind_address() -> String {
     "127.0.0.1:1819".into()
 }
@@ -354,12 +417,14 @@ impl ConnectionProfile {
             Protocol::Masque => args.push("--masque".into()),
             Protocol::Wireguard => args.push("--wg".into()),
             Protocol::Gool => args.push("--gool".into()),
+            Protocol::GoolClassic => args.push("--gool-classic".into()),
+            Protocol::Mim => args.push("--mim".into()),
         }
         args.push(match self.scan_mode {
             ScanMode::Turbo => "--turbo".into(),
             ScanMode::Balanced => "--balanced".into(),
             ScanMode::Thorough => "--thorough".into(),
-            ScanMode::Stealth => "--stealth".into(),
+            ScanMode::Verified => "--verified".into(),
             ScanMode::Ironclad => "--ironclad".into(),
         });
         args.push(match self.ip_version {
@@ -372,15 +437,9 @@ impl ConnectionProfile {
         } else {
             "--no-quick-reconnect".into()
         });
-        // Noize profile — pick the value matching the active protocol family.
+        // Unified obfuscation profile (v2.2 one list for every protocol).
         args.push("--noize".into());
-        args.push(
-            match self.protocol {
-                Protocol::Auto | Protocol::Masque => self.masque_noize.as_flag(),
-                Protocol::Wireguard | Protocol::Gool => self.wg_noize.as_flag(),
-            }
-            .into(),
-        );
+        args.push(self.noize.as_flag().into());
         // Only forward --bind when non-default and parseable.
         if self.bind_address != default_bind_address()
             && self.bind_address.parse::<std::net::SocketAddr>().is_ok()
@@ -450,6 +509,117 @@ impl ConnectionProfile {
         if !self.routes_file.trim().is_empty() {
             args.push("--routes".into());
             args.push(self.routes_file.trim().into());
+        }
+        // v2.2 forced/manual endpoints (skip scanning for named hops).
+        for (flag, val) in [
+            ("--peer", &self.peer),
+            ("--wg-peer", &self.wg_peer),
+            ("--gool-peer", &self.gool_peer),
+            ("--wiw-outer", &self.wiw_outer),
+            ("--wiw-inner", &self.wiw_inner),
+            ("--mim-outer", &self.mim_outer),
+            ("--mim-inner", &self.mim_inner),
+        ] {
+            if !val.trim().is_empty() {
+                args.push(flag.into());
+                args.push(val.trim().into());
+            }
+        }
+        if !self.exit_loc.trim().is_empty() {
+            args.push("--exit-loc".into());
+            args.push(self.exit_loc.trim().into());
+        }
+        if self.api_fragment {
+            args.push("--api-fragment".into());
+        }
+        if self.no_quic_v2 {
+            args.push("--no-quic-v2".into());
+        }
+        if !self.h2_peer.trim().is_empty() {
+            args.push("--h2-peer".into());
+            args.push(self.h2_peer.trim().into());
+        }
+        if self.no_data_check {
+            args.push("--no-data-check".into());
+        }
+        if self.no_profile_retry {
+            args.push("--no-profile-retry".into());
+        }
+        if !self.keepalive.trim().is_empty() {
+            args.push("--keepalive".into());
+            args.push(self.keepalive.trim().into());
+        }
+        if !self.perf.trim().is_empty() {
+            args.push("--perf".into());
+            args.push(self.perf.trim().into());
+        }
+        if !self.ech.trim().is_empty() {
+            args.push("--ech".into());
+            args.push(self.ech.trim().into());
+        }
+        if !self.ech_dns.trim().is_empty() {
+            args.push("--ech-dns".into());
+            args.push(self.ech_dns.trim().into());
+        }
+        if !self.ech_domain.trim().is_empty() {
+            args.push("--ech-domain".into());
+            args.push(self.ech_domain.trim().into());
+        }
+        if !self.tls_ciphers.trim().is_empty() {
+            args.push("--tls-ciphers".into());
+            args.push(self.tls_ciphers.trim().into());
+        }
+        if !self.tls_groups.trim().is_empty() {
+            args.push("--tls-groups".into());
+            args.push(self.tls_groups.trim().into());
+        }
+        if self.disable_grease {
+            args.push("--disable-grease".into());
+        }
+        // Extra Tor controls (relays/bridges/bind), each gated on a Tor
+        // mode like --tor-bridges above.
+        let tor_mode = matches!(
+            self.extra_transport,
+            ExtraTransport::Tor | ExtraTransport::TorReverse | ExtraTransport::TorOnly
+        );
+        if tor_mode && !self.tor_relays.trim().is_empty() {
+            args.push("--tor-relays".into());
+            args.push(self.tor_relays.trim().into());
+        }
+        if tor_mode {
+            for line in self.tor_bridge.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                args.push("--tor-bridge".into());
+                args.push(line.into());
+            }
+            if !self.tor_bridge_file.trim().is_empty() {
+                args.push("--tor-bridge-file".into());
+                args.push(self.tor_bridge_file.trim().into());
+            }
+            if !self.tor_bind.trim().is_empty() {
+                args.push("--tor-bind".into());
+                args.push(self.tor_bind.trim().into());
+            }
+        }
+        // Extra Psiphon controls, gated on a core Psiphon mode (direct
+        // mode drives the console client itself — see psiphon_direct.rs).
+        let psi_mode = matches!(
+            self.extra_transport,
+            ExtraTransport::Psiphon | ExtraTransport::PsiphonReverse | ExtraTransport::PsiphonOnly
+        );
+        if psi_mode {
+            for (flag, val) in [
+                ("--psiphon-config", &self.psiphon_config),
+                ("--psiphon-cdn-ips", &self.psiphon_cdn_ips),
+                ("--psiphon-cdn-sni", &self.psiphon_cdn_sni),
+                ("--psiphon-cdn-sets", &self.psiphon_cdn_sets),
+                ("--psiphon-server-entries", &self.psiphon_server_entries),
+                ("--psiphon-bind", &self.psiphon_bind),
+            ] {
+                if !val.trim().is_empty() {
+                    args.push(flag.into());
+                    args.push(val.trim().into());
+                }
+            }
         }
         args
     }
@@ -543,7 +713,9 @@ mod tests {
         let json = r#"{"protocol":"auto","scan_mode":"balanced","ip_version":"v4","quick_reconnect":true,"masque_http2":false}"#;
         let p: ConnectionProfile = serde_json::from_str(json).unwrap();
         assert_eq!(p.bind_address, "127.0.0.1:1819");
-        assert_eq!(p.masque_noize, MasqueNoize::Firewall);
+        assert_eq!(p.noize, Noize::Firewall);
+        assert!(p.route_sniff);
+        assert_eq!(p.extra_transport, ExtraTransport::None);
     }
 
     #[test]
@@ -687,6 +859,40 @@ mod tests {
     }
 
     #[test]
+    fn v22_modes_emit() {
+        let mut p = ConnectionProfile::default();
+        p.protocol = Protocol::Mim;
+        p.scan_mode = ScanMode::Verified;
+        p.noize = Noize::Aggressive;
+        p.peer = "1.2.3.4:443".into();
+        p.exit_loc = "!IR,AZ,RU".into();
+        p.api_fragment = true;
+        p.ech = "auto".into();
+        let args = p.as_args();
+        for want in ["--mim", "--verified", "--noize", "aggressive", "--peer", "1.2.3.4:443",
+            "--exit-loc", "!IR,AZ,RU", "--api-fragment", "--ech", "auto"] {
+            assert!(args.iter().any(|a| a == want), "missing {want}: {args:?}");
+        }
+    }
+
+    #[test]
+    fn v22_tor_psiphon_extras_gated() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::TorOnly;
+        p.tor_relays = "only".into();
+        p.tor_bridge = "obfs4 1.2.3.4:443 FP cert=x iat-mode=0\n\nobfs4 5.6.7.8:443 FP2 cert=y".into();
+        p.tor_bind = "127.0.0.1:1900".into();
+        p.psiphon_region = "DE".into();
+        let args = p.as_args();
+        for want in ["--tor-relays", "only", "--tor-bridge", "--tor-bind", "127.0.0.1:1900"] {
+            assert!(args.iter().any(|a| a == want), "missing {want}: {args:?}");
+        }
+        assert_eq!(args.iter().filter(|a| *a == "--tor-bridge").count(), 2);
+        // Psiphon region stays off without a Psiphon mode.
+        assert!(!args.iter().any(|a| a == "--psiphon-region"));
+    }
+
+    #[test]
     fn zero_trust_email_is_provided_as_an_environment_value() {        let p = ConnectionProfile {
             zero_trust_team: "acme".into(),
             access_email: "me@example.com".into(),
@@ -709,8 +915,7 @@ impl Default for ConnectionProfile {
             ip_version: IpVersion::V4,
             quick_reconnect: true,
             masque_http2: false,
-            masque_noize: MasqueNoize::Firewall,
-            wg_noize: WgNoize::Balanced,
+            noize: Noize::Firewall,
             bind_address: default_bind_address(),
             http_port: String::new(),
             dns: String::new(),
@@ -724,6 +929,41 @@ impl Default for ConnectionProfile {
             route_block: String::new(),
             route_direct: String::new(),
             routes_file: String::new(),
+            peer: String::new(),
+            wg_peer: String::new(),
+            gool_peer: String::new(),
+            wiw_outer: String::new(),
+            wiw_inner: String::new(),
+            mim_outer: String::new(),
+            mim_inner: String::new(),
+            exit_loc: String::new(),
+            api_fragment: false,
+            no_quic_v2: false,
+            h2_peer: String::new(),
+            no_data_check: false,
+            no_profile_retry: false,
+            keepalive: String::new(),
+            perf: String::new(),
+            ech: String::new(),
+            ech_dns: String::new(),
+            ech_domain: String::new(),
+            tls_ciphers: String::new(),
+            tls_groups: String::new(),
+            disable_grease: false,
+            masque_mtu: String::new(),
+            netstack_rx: String::new(),
+            netstack_tx: String::new(),
+            route_sniff: true,
+            tor_relays: String::new(),
+            tor_bridge: String::new(),
+            tor_bridge_file: String::new(),
+            tor_bind: String::new(),
+            psiphon_config: String::new(),
+            psiphon_cdn_ips: String::new(),
+            psiphon_cdn_sni: String::new(),
+            psiphon_cdn_sets: String::new(),
+            psiphon_server_entries: String::new(),
+            psiphon_bind: String::new(),
             upstream: String::new(),
             extra_transport: ExtraTransport::None,
             tor_bridges: false,
@@ -742,11 +982,27 @@ const STORE_KEY: &str = "last_successful_profile";
 /// guess can't poison future one-click connects.
 pub fn load(app: &tauri::AppHandle) -> ConnectionProfile {
     use tauri_plugin_store::StoreExt;
-    app.store(STORE_FILE)
-        .ok()
-        .and_then(|s| s.get(STORE_KEY))
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default()
+    // v2.2 renamed the stealth scan mode to verified — migrate saved
+    // profiles instead of dropping all their settings on parse failure.
+    if let Ok(store) = app.store(STORE_FILE) {
+        if let Some(mut value) = store.get(STORE_KEY) {
+            migrate_stealth(&mut value);
+            if let Ok(p) = serde_json::from_value(value) {
+                return p;
+            }
+        }
+    }
+    ConnectionProfile::default()
+}
+
+/// Rewrites scan_mode "stealth" (removed in core v2.2) to "verified" in a
+/// saved profile value, preserving every other setting.
+fn migrate_stealth(value: &mut serde_json::Value) {
+    if value.get("scan_mode").and_then(|v| v.as_str()) == Some("stealth") {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("scan_mode".into(), serde_json::Value::from("verified"));
+        }
+    }
 }
 
 pub fn save(app: &tauri::AppHandle, profile: &ConnectionProfile) {
