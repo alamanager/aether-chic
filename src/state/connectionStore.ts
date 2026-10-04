@@ -30,6 +30,9 @@ interface ConnectionState {
   /** Live transfer counters + per-second rates (null until the first
    * stats line arrives). Reset on every fresh attempt. */
   traffic: { up: number; down: number; upRate: number; downRate: number; at: number } | null;
+  /** Ring buffer of per-report rates for the graph (~2s each, max 120 ≈
+   * 4 min). Nulls mark disconnect gaps so the line breaks visibly. */
+  samples: { t: number; down: number | null; up: number | null }[];
   /** Monotonic key for controls that must reset between explicit connects. */
   attemptId: number;
   connect: () => Promise<void>;
@@ -97,12 +100,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   scanBudgetSecs: null,
   torPercent: null,
   traffic: null,
+  samples: [],
   attemptId: 0,
 
   connect: async () => {
     // A fresh user-initiated attempt should not inherit stale log-driven UI
     // prompts (notably a previous Zero Trust email-code request).
-    set((s) => ({ logs: [], scanBudgetSecs: null, torPercent: null, traffic: null, attemptId: s.attemptId + 1 }));
+    set((s) => ({ logs: [], scanBudgetSecs: null, torPercent: null, traffic: null, samples: [], attemptId: s.attemptId + 1 }));
     try {
       await invoke("connect", { profileOverride: get().profile });
     } catch (e) {
@@ -271,33 +275,38 @@ export async function initConnectionListeners(): Promise<() => void> {
     // Per-second rates from the delta since the previous stats line. The
     // core reports every ~2s (AETHER_STATS_SECS), so divide by wall time.
     let traffic: ConnectionState["traffic"] = null;
+    let sample: ConnectionState["samples"][number] | null = null;
     if (statUp !== null && statDown !== null) {
       const prev = useConnectionStore.getState().traffic;
       const now = Date.now();
       const dt = prev && prev.at > 0 ? Math.max(1, (now - prev.at) / 1000) : 2;
-      traffic = {
-        up: statUp,
-        down: statDown,
-        upRate: Math.max(0, (statUp - (prev?.up ?? 0)) / dt),
-        downRate: Math.max(0, (statDown - (prev?.down ?? 0)) / dt),
-        at: now,
-      };
+      const upRate = Math.max(0, (statUp - (prev?.up ?? 0)) / dt);
+      const downRate = Math.max(0, (statDown - (prev?.down ?? 0)) / dt);
+      traffic = { up: statUp, down: statDown, upRate, downRate, at: now };
+      sample = { t: now, down: downRate, up: upRate };
     }
     useConnectionStore.setState((s) => ({
       logs: [...s.logs, ...batch].slice(-MAX_LOG_LINES),
       ...(budget !== null ? { scanBudgetSecs: budget } : {}),
       ...(tor !== null ? { torPercent: tor } : {}),
       ...(traffic !== null ? { traffic } : {}),
+      ...(sample !== null ? { samples: [...s.samples, sample].slice(-120) } : {}),
     }));
   };
 
   const [unlistenStatus, unlistenLog] = await Promise.all([
     listen<ConnectionStatus>("aether://status", (e) => {
-      useConnectionStore.setState({
+      useConnectionStore.setState((s) => ({
         status: e.payload,
         // Fresh attempt — last attempt's budget/percent/counters reset.
-        ...(e.payload.state === "Launching" ? { scanBudgetSecs: null, torPercent: null, traffic: null } : {}),
-      });
+        ...(e.payload.state === "Launching"
+          ? { scanBudgetSecs: null, torPercent: null, traffic: null, samples: [] }
+          : {}),
+        // Disconnect gap marker so the graph line visibly breaks.
+        ...(e.payload.state === "Idle" && s.samples.length > 0 && s.samples[s.samples.length - 1].down !== null
+          ? { samples: [...s.samples, { t: Date.now(), down: null, up: null }].slice(-120) }
+          : {}),
+      }));
     }),
     listen<LogLine>("aether://log", (e) => {
       pendingLogs.push(e.payload);

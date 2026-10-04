@@ -23,14 +23,17 @@ export function SpeedCard() {
     rate: string,
     total: string,
   ) => (
-    <div className="flex min-h-[52px] flex-1 items-center gap-2.5 rounded-xl px-3 py-2 ring-1 transition-opacity bg-black/20 ring-white/10 light:bg-black/5 light:ring-black/10">
-      <span className="text-muted-foreground">{icon}</span>
+    <div className="flex min-h-[64px] flex-1 items-center gap-2.5 overflow-hidden rounded-xl px-3 py-2 ring-1 transition-opacity bg-black/20 ring-white/10 light:bg-black/5 light:ring-black/10">
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
       <span className="min-w-0 flex-1 text-left">
         <span className="block text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
           {label}
         </span>
-        <span className="block truncate font-mono text-xs text-foreground" dir="ltr">
-          {rate} <span className="opacity-60">· Σ {total}</span>
+        <span className="block truncate font-mono text-[13px] font-semibold text-foreground" dir="ltr">
+          {rate}
+        </span>
+        <span className="block truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
+          Σ {total}
         </span>
       </span>
     </div>

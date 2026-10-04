@@ -6,6 +6,7 @@ import { ConnectionStatusLine } from "@/components/ConnectionStatusLine";
 import { TorStallGuard } from "@/components/TorStallGuard";
 import { ConnectionInfo } from "@/components/ConnectionInfo";
 import { SpeedCard } from "@/components/SpeedCard";
+import { TransferGraph } from "@/components/TransferGraph";
 import { SettingsTab } from "@/components/SettingsTab";
 import { LogsTab } from "@/components/LogsTab";
 import { CloseToTrayToggle } from "@/components/CloseToTrayToggle";
@@ -51,6 +52,7 @@ function HomeTab() {
       <AccessCodePrompt key={attemptId} />
       <ConnectionInfo />
       <SpeedCard />
+      <TransferGraph />
       <div className="w-full max-w-sm">
         <CloseToTrayToggle />
       </div>

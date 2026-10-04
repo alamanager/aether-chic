@@ -290,6 +290,29 @@ pub fn http_proxy_addr(bind_address: &str, http_port: &str) -> String {
     http_proxy_socket(bind_address, http_port).to_string()
 }
 
+/// The --http-proxy value handed to the core: same address family as --bind
+/// (so 0.0.0.0 LAN sharing covers HTTP too), port resolved like the display
+/// address. The display/system-proxy form additionally maps unspecified IPs
+/// to loopback — clients can't dial 0.0.0.0.
+pub fn flag_http_addr(bind_address: &str, http_port: &str) -> String {
+    match bind_address.parse::<std::net::SocketAddr>() {
+        Ok(socks) => {
+            let mut http = socks;
+            match http_port.trim().parse::<u16>() {
+                Ok(p) if p >= 1 && p != socks.port() => http.set_port(p),
+                _ => {
+                    http.set_port(socks.port().wrapping_add(1));
+                    if http.port() == 0 {
+                        http.set_port(1820);
+                    }
+                }
+            }
+            http.to_string()
+        }
+        Err(_) => "127.0.0.1:1820".into(),
+    }
+}
+
 /// Socket version of the above. An unspecified (0.0.0.0) bind maps to
 /// loopback — see status::client_addr — because 0.0.0.0 is not connectable
 /// and must never be reported to clients or the system proxy.
@@ -368,7 +391,9 @@ impl ConnectionProfile {
         // Aether ≥1.6.0 serves a native HTTP CONNECT proxy next to SOCKS5 —
         // this replaced the GUI's old hand-rolled bridge. Always on, on its
         // own port (custom or SOCKS port + 1) so the two stay separable.
-        let http_addr = http_proxy_addr(&self.bind_address, &self.http_port);
+        // NOTE: the flag keeps the bind IP (LAN sharing covers HTTP too);
+        // only the displayed/proxied address maps 0.0.0.0 to loopback.
+        let http_addr = flag_http_addr(&self.bind_address, &self.http_port);
         args.push("--http-proxy".into());
         args.push(http_addr);
         if !self.upstream.trim().is_empty() {
@@ -585,6 +610,10 @@ mod tests {
         // Same as SOCKS or invalid → falls back to SOCKS+1.
         assert_eq!(http_proxy_addr("127.0.0.1:1819", "1819"), "127.0.0.1:1820");
         assert_eq!(http_proxy_addr("127.0.0.1:1819", "abc"), "127.0.0.1:1820");
+        // Display maps LAN binds to loopback; the core flag keeps them.
+        assert_eq!(http_proxy_addr("0.0.0.0:1819", ""), "127.0.0.1:1820");
+        assert_eq!(flag_http_addr("0.0.0.0:1819", ""), "0.0.0.0:1820");
+        assert_eq!(flag_http_addr("0.0.0.0:1919", "18080"), "0.0.0.0:18080");
         let mut p = ConnectionProfile::default();
         p.http_port = "18080".into();
         let args = p.as_args();
