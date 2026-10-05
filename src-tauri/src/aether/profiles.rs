@@ -353,29 +353,6 @@ pub fn http_proxy_addr(bind_address: &str, http_port: &str) -> String {
     http_proxy_socket(bind_address, http_port).to_string()
 }
 
-/// The --http-proxy value handed to the core: same address family as --bind
-/// (so 0.0.0.0 LAN sharing covers HTTP too), port resolved like the display
-/// address. The display/system-proxy form additionally maps unspecified IPs
-/// to loopback — clients can't dial 0.0.0.0.
-pub fn flag_http_addr(bind_address: &str, http_port: &str) -> String {
-    match bind_address.parse::<std::net::SocketAddr>() {
-        Ok(socks) => {
-            let mut http = socks;
-            match http_port.trim().parse::<u16>() {
-                Ok(p) if p >= 1 && p != socks.port() => http.set_port(p),
-                _ => {
-                    http.set_port(socks.port().wrapping_add(1));
-                    if http.port() == 0 {
-                        http.set_port(1820);
-                    }
-                }
-            }
-            http.to_string()
-        }
-        Err(_) => "127.0.0.1:1820".into(),
-    }
-}
-
 /// Socket version of the above. An unspecified (0.0.0.0) bind maps to
 /// loopback — see status::client_addr — because 0.0.0.0 is not connectable
 /// and must never be reported to clients or the system proxy.
@@ -400,6 +377,79 @@ pub fn http_proxy_socket(bind_address: &str, http_port: &str) -> std::net::Socke
         Err(_) => "127.0.0.1:1820"
             .parse()
             .expect("loopback literal always parses"),
+    }
+}
+
+/// Effective Tor exit listener for inside/reverse modes: explicit field or
+/// core default. None otherwise (tor-only serves on --bind instead).
+pub fn tor_exit_addr(p: &ConnectionProfile) -> Option<std::net::SocketAddr> {
+    if !matches!(
+        p.extra_transport,
+        ExtraTransport::Tor | ExtraTransport::TorReverse
+    ) {
+        return None;
+    }
+    let raw = if p.tor_bind.trim().is_empty() {
+        "127.0.0.1:1820".to_string()
+    } else {
+        p.tor_bind.trim().to_string()
+    };
+    raw.parse::<std::net::SocketAddr>()
+        .ok()
+        .map(|s| super::status::client_addr(&s))
+}
+
+/// Effective Psiphon exit listener for inside/reverse modes.
+pub fn psi_exit_addr(p: &ConnectionProfile) -> Option<std::net::SocketAddr> {
+    if !matches!(
+        p.extra_transport,
+        ExtraTransport::Psiphon | ExtraTransport::PsiphonReverse
+    ) {
+        return None;
+    }
+    let raw = if p.psiphon_bind.trim().is_empty() {
+        "127.0.0.1:1821".to_string()
+    } else {
+        p.psiphon_bind.trim().to_string()
+    };
+    raw.parse::<std::net::SocketAddr>()
+        .ok()
+        .map(|s| super::status::client_addr(&s))
+}
+
+/// Display HTTP endpoint: base address, bumped while it collides with the
+/// SOCKS port or a Tor/Psiphon exit listener. Ports overlap across bind IPs
+/// (0.0.0.0:1820 and 127.0.0.1:1820 collide), so the comparison is by port —
+/// e.g. tor-inside with everything default puts both on 1820 and HTTP
+/// moves aside; the log reports the real ports.
+pub fn http_proxy_socket_for(p: &ConnectionProfile) -> std::net::SocketAddr {
+    let socks_port = p
+        .bind_address
+        .parse::<std::net::SocketAddr>()
+        .map(|s| s.port())
+        .unwrap_or(1819);
+    let mut http = http_proxy_socket(&p.bind_address, &p.http_port);
+    let tor = tor_exit_addr(p).map(|s| s.port());
+    let psi = psi_exit_addr(p).map(|s| s.port());
+    for _ in 0..3 {
+        if http.port() != socks_port && Some(http.port()) != tor && Some(http.port()) != psi {
+            break;
+        }
+        http.set_port(http.port().wrapping_add(1));
+        if http.port() == 0 {
+            http.set_port(1820);
+        }
+    }
+    http
+}
+
+/// The --http-proxy flag value: same resolved port as the display address,
+/// but on the bind IP (so LAN sharing covers HTTP too).
+pub fn flag_http_addr_for(p: &ConnectionProfile) -> String {
+    let port = http_proxy_socket_for(p).port();
+    match p.bind_address.parse::<std::net::SocketAddr>() {
+        Ok(socks) => std::net::SocketAddr::new(socks.ip(), port).to_string(),
+        Err(_) => format!("127.0.0.1:{port}"),
     }
 }
 
@@ -452,7 +502,7 @@ impl ConnectionProfile {
         // own port (custom or SOCKS port + 1) so the two stay separable.
         // NOTE: the flag keeps the bind IP (LAN sharing covers HTTP too);
         // only the displayed/proxied address maps 0.0.0.0 to loopback.
-        let http_addr = flag_http_addr(&self.bind_address, &self.http_port);
+        let http_addr = flag_http_addr_for(self);
         args.push("--http-proxy".into());
         args.push(http_addr);
         if !self.upstream.trim().is_empty() {
@@ -784,8 +834,12 @@ mod tests {
         assert_eq!(http_proxy_addr("127.0.0.1:1819", "abc"), "127.0.0.1:1820");
         // Display maps LAN binds to loopback; the core flag keeps them.
         assert_eq!(http_proxy_addr("0.0.0.0:1819", ""), "127.0.0.1:1820");
-        assert_eq!(flag_http_addr("0.0.0.0:1819", ""), "0.0.0.0:1820");
-        assert_eq!(flag_http_addr("0.0.0.0:1919", "18080"), "0.0.0.0:18080");
+        let mut q = ConnectionProfile::default();
+        q.bind_address = "0.0.0.0:1819".into();
+        assert_eq!(flag_http_addr_for(&q), "0.0.0.0:1820");
+        q.bind_address = "0.0.0.0:1919".into();
+        q.http_port = "18080".into();
+        assert_eq!(flag_http_addr_for(&q), "0.0.0.0:18080");
         let mut p = ConnectionProfile::default();
         p.http_port = "18080".into();
         let args = p.as_args();
@@ -876,8 +930,26 @@ mod tests {
     }
 
     #[test]
-    fn v22_tor_psiphon_extras_gated() {
+    fn http_moves_aside_from_tor_exit() {
+        // tor-inside with everything default: tor exit 1820, HTTP would be
+        // 1820 too — HTTP moves to 1821, on both display and flag forms.
         let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::Tor;
+        assert_eq!(tor_exit_addr(&p).map(|s| s.port()), Some(1820));
+        assert_eq!(http_proxy_socket_for(&p).to_string(), "127.0.0.1:1821");
+        assert_eq!(flag_http_addr_for(&p), "127.0.0.1:1821");
+        // Explicit tor bind elsewhere: no move.
+        p.tor_bind = "127.0.0.1:1900".into();
+        assert_eq!(http_proxy_socket_for(&p).to_string(), "127.0.0.1:1820");
+        // No tor mode: no exits, no move.
+        p.extra_transport = ExtraTransport::None;
+        p.tor_bind = String::new();
+        assert_eq!(tor_exit_addr(&p), None);
+        assert_eq!(http_proxy_socket_for(&p).to_string(), "127.0.0.1:1820");
+    }
+
+    #[test]
+    fn v22_tor_psiphon_extras_gated() {        let mut p = ConnectionProfile::default();
         p.extra_transport = ExtraTransport::TorOnly;
         p.tor_relays = "only".into();
         p.tor_bridge = "obfs4 1.2.3.4:443 FP cert=x iat-mode=0\n\nobfs4 5.6.7.8:443 FP2 cert=y".into();

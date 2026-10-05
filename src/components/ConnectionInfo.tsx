@@ -138,14 +138,54 @@ export function ConnectionInfo() {
   const autoFor = useRef(0);
 
   const connected = status.state === "Connected";
+  const extra = useConnectionStore((s) => s.profile.extra_transport);
+  const torBind = useConnectionStore((s) => s.profile.tor_bind);
+  const psiBind = useConnectionStore((s) => s.profile.psiphon_bind);
   const fromBind = addrsFromBind(bind);
   // While connected, trust the backend-reported endpoints (direct mode
   // serves 11819/11820, not the profile ports); otherwise show what a
   // connect will use. Inline state checks so TS narrows the union.
   const socksAddr =
     status.state === "Connected" ? status.socks_addr : fromBind.socks;
-  const httpAddr =
+  // Tor/Psiphon exit listeners for inside/reverse modes (mirrors the
+  // backend resolution incl. defaults); the HTTP row moves aside on clash.
+  const normExit = (raw: string, def: string): string | null => {
+    const v = (raw || "").trim() || def;
+    const m = /^(.*):(\d+)\s*$/.exec(v);
+    if (!m) return def;
+    let h = m[1].replace(/^\[|\]$/g, "");
+    if (h === "" || h === "0.0.0.0" || h === "::") h = "127.0.0.1";
+    return `${h}:${m[2]}`;
+  };
+  const torExit =
+    extra === "tor" || extra === "tor_reverse" ? normExit(torBind, "127.0.0.1:1820") : null;
+  const psiExit =
+    extra === "psiphon" || extra === "psiphon_reverse"
+      ? normExit(psiBind, "127.0.0.1:1821")
+      : null;
+  const portOf = (a: string): number | null => {
+    const m = /:(\d+)\s*$/.exec(a);
+    return m ? Number(m[1]) : null;
+  };
+  let httpAddr =
     status.state === "Connected" ? httpPortOf(status.socks_addr) : fromBind.http;
+  {
+    // Same collision rule as the backend: never show an HTTP address that
+    // equals the SOCKS or an exit listener port.
+    const taken = new Set<number>();
+    const sp = portOf(socksAddr);
+    if (sp !== null) taken.add(sp);
+    const tp = torExit ? portOf(torExit) : null;
+    if (tp !== null) taken.add(tp);
+    const pp = psiExit ? portOf(psiExit) : null;
+    if (pp !== null) taken.add(pp);
+    let hp = portOf(httpAddr);
+    for (let i = 0; i < 3 && hp !== null && taken.has(hp); i++) {
+      hp = hp >= 65535 ? 1820 : hp + 1;
+      const m = /^(.*):\d+\s*$/.exec(httpAddr);
+      if (m) httpAddr = `${m[1]}:${hp}`;
+    }
+  }
 
   const fetchIp = useCallback(async () => {
     setIpLoading(true);
@@ -259,6 +299,26 @@ export function ConnectionInfo() {
         copied={copied === "http"}
         dimmed={!connected}
       />
+      {torExit && (
+        <Row
+          icon={<Server className="size-4" />}
+          label="Tor exit"
+          value={torExit}
+          onCopy={() => void doCopy("tor", torExit)}
+          copied={copied === "tor"}
+          dimmed={!connected}
+        />
+      )}
+      {psiExit && (
+        <Row
+          icon={<Server className="size-4" />}
+          label="Psiphon exit"
+          value={psiExit}
+          onCopy={() => void doCopy("psi", psiExit)}
+          copied={copied === "psi"}
+          dimmed={!connected}
+        />
+      )}
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <Row

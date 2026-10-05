@@ -200,7 +200,16 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   },
 
   setProtocol: (protocol) =>
-    set((s) => ({ profile: { ...s.profile, protocol } })),
+    set((s) => ({
+      profile: {
+        ...s.profile,
+        protocol,
+        // gool-classic is WireGuard-based: the core refuses reverse-mode
+        // transports with it, so selecting it clears Extra transport
+        // instead of letting a dead combo through.
+        ...(protocol === "gool_classic" ? { extra_transport: "none" } : {}),
+      },
+    })),
 
   setScanMode: (scan_mode) =>
     set((s) => ({ profile: { ...s.profile, scan_mode } })),

@@ -157,7 +157,7 @@ export function SettingsTab() {
         </FieldRow>
         <FieldRow
           label="Extra transport"
-          tooltip="Built-in Tor or Psiphon from core v2.x — either carried inside the tunnel, used to reach the tunnel, or on its own. Needs the pt/ transports bundled with the app."
+          tooltip="Built-in Tor or Psiphon: carried inside the tunnel (exit on its own listener, 1819 keeps WARP), used to reach the tunnel, or on its own. Needs pt/ bundled. gool-classic clears this (refused combo)."
         >
           <ExtraTransportSelect />
           <TorBridgesRow />
