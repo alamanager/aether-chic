@@ -266,6 +266,7 @@ impl ExtraTransport {
             ExtraTransport::PsiphonOnly => Some("--psiphon-only"),
         }
     }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
