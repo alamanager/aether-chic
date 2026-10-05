@@ -120,19 +120,27 @@ export function ConnectionInfo() {
   const connected = status.state === "Connected";
   const extra = useConnectionStore((s) => s.profile.extra_transport);
   const httpPortField = useConnectionStore((s) => s.profile.http_port);
+  const torBind = useConnectionStore((s) => s.profile.tor_bind);
+  const psiBind = useConnectionStore((s) => s.profile.psiphon_bind);
   const fromBind = addrsFromBind(bind);
-  const TOR_EXIT = "127.0.0.1:1820";
-  const PSI_EXIT = "127.0.0.1:1821";
   const isTorChain = extra === "tor" || extra === "tor_reverse";
   const isPsiChain = extra === "psiphon" || extra === "psiphon_reverse";
+  // Effective exit listeners: explicit field or core default, loopback-
+  // mapped for display — the same rule as the backend (profiles.rs).
+  const normExit = (raw: string, def: string): string | null => {
+    const v = (raw || "").trim() || def;
+    const m = /^(.*):(\d+)\s*$/.exec(v);
+    if (!m) return def;
+    let h = m[1].replace(/^\[|\]$/g, "");
+    if (h === "" || h === "0.0.0.0" || h === "::") h = "127.0.0.1";
+    return `${h}:${m[2]}`;
+  };
+  const torExit = isTorChain ? normExit(torBind, "127.0.0.1:1820") : null;
+  const psiExit = isPsiChain ? normExit(psiBind, "127.0.0.1:1821") : null;
   const socksAddr =
     status.state === "Connected"
       ? status.socks_addr
-      : isTorChain
-        ? TOR_EXIT
-        : isPsiChain
-          ? PSI_EXIT
-          : fromBind.socks;
+      : (torExit ?? psiExit ?? fromBind.socks);
   const portOf = (a: string): number | null => {
     const m = /:(\d+)\s*$/.exec(a);
     return m ? Number(m[1]) : null;
@@ -142,20 +150,29 @@ export function ConnectionInfo() {
     return m ? m[1] : "127.0.0.1";
   };
   const socksPort = portOf(socksAddr) ?? portOf(fromBind.socks) ?? 1819;
+  // Same collision rule as the backend: custom wins unless it equals the
+  // SOCKS or an exit listener port; otherwise SOCKS+1 (1822 for Tor
+  // chains), bumped past any taken port.
+  const taken = new Set<number>([socksPort]);
+  const tp = torExit ? portOf(torExit) : null;
+  if (tp !== null) taken.add(tp);
+  const pp = psiExit ? portOf(psiExit) : null;
+  if (pp !== null) taken.add(pp);
   const customPort = (() => {
     const n = Number(httpPortField);
     return httpPortField.trim() !== "" &&
       Number.isInteger(n) &&
       n >= 1 &&
       n <= 65535 &&
-      n !== socksPort
+      !taken.has(n)
       ? n
       : null;
   })();
-  const httpPort = customPort ?? (isTorChain ? 1822 : socksPort >= 65535 ? 1820 : socksPort + 1);
+  let httpPort = customPort ?? (isTorChain ? 1822 : socksPort >= 65535 ? 1820 : socksPort + 1);
+  for (let i = 0; i < 4 && taken.has(httpPort); i++) {
+    httpPort = httpPort >= 65535 ? 1820 : httpPort + 1;
+  }
   const httpAddr = `${hostOf(fromBind.socks)}:${httpPort}`;
-  const torExit = isTorChain ? TOR_EXIT : null;
-  const psiExit = isPsiChain ? PSI_EXIT : null;
 
   const fetchIp = useCallback(async () => {
     setIpLoading(true);

@@ -58,6 +58,18 @@ interface ConnectionState {
   setUpstream: (upstream: string) => void;
   setExtraTransport: (extra_transport: ExtraTransport) => void;
   setPsiphonRegion: (psiphon_region: string) => void;
+  setTorBridges: (tor_bridges: boolean) => void;
+  setPsiphonMode: (psiphon_mode: ConnectionProfile["psiphon_mode"]) => void;
+  setTorRelays: (tor_relays: string) => void;
+  setTorBridge: (tor_bridge: string) => void;
+  setTorBridgeFile: (tor_bridge_file: string) => void;
+  setTorBind: (tor_bind: string) => void;
+  setPsiphonConfig: (psiphon_config: string) => void;
+  setPsiphonCdnIps: (psiphon_cdn_ips: string) => void;
+  setPsiphonCdnSni: (psiphon_cdn_sni: string) => void;
+  setPsiphonCdnSets: (psiphon_cdn_sets: string) => void;
+  setPsiphonServerEntries: (psiphon_server_entries: string) => void;
+  setPsiphonBind: (psiphon_bind: string) => void;
   setPeer: (peer: string) => void;
   setWgPeer: (wg_peer: string) => void;
   setGoolPeer: (gool_peer: string) => void;
@@ -112,6 +124,18 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     upstream: "",
     extra_transport: "none",
     psiphon_region: "",
+    tor_bridges: false,
+    psiphon_mode: "auto",
+    tor_relays: "",
+    tor_bridge: "",
+    tor_bridge_file: "",
+    tor_bind: "",
+    psiphon_config: "",
+    psiphon_cdn_ips: "",
+    psiphon_cdn_sni: "",
+    psiphon_cdn_sets: "",
+    psiphon_server_entries: "",
+    psiphon_bind: "",
     peer: "",
     wg_peer: "",
     gool_peer: "",
@@ -253,6 +277,30 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   setPsiphonRegion: (psiphon_region) =>
     set((s) => ({ profile: { ...s.profile, psiphon_region } })),
+
+  setTorBridges: (tor_bridges) =>
+    set((s) => ({ profile: { ...s.profile, tor_bridges } })),
+
+  setPsiphonMode: (psiphon_mode) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_mode } })),
+
+  setTorRelays: (tor_relays) => set((s) => ({ profile: { ...s.profile, tor_relays } })),
+  setTorBridge: (tor_bridge) => set((s) => ({ profile: { ...s.profile, tor_bridge } })),
+  setTorBridgeFile: (tor_bridge_file) =>
+    set((s) => ({ profile: { ...s.profile, tor_bridge_file } })),
+  setTorBind: (tor_bind) => set((s) => ({ profile: { ...s.profile, tor_bind } })),
+  setPsiphonConfig: (psiphon_config) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_config } })),
+  setPsiphonCdnIps: (psiphon_cdn_ips) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_cdn_ips } })),
+  setPsiphonCdnSni: (psiphon_cdn_sni) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_cdn_sni } })),
+  setPsiphonCdnSets: (psiphon_cdn_sets) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_cdn_sets } })),
+  setPsiphonServerEntries: (psiphon_server_entries) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_server_entries } })),
+  setPsiphonBind: (psiphon_bind) =>
+    set((s) => ({ profile: { ...s.profile, psiphon_bind } })),
 
   setPeer: (peer) => set((s) => ({ profile: { ...s.profile, peer } })),
   setWgPeer: (wg_peer) => set((s) => ({ profile: { ...s.profile, wg_peer } })),

@@ -6,9 +6,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useConnectionStore } from "@/state/connectionStore";
+import type { ConnectionProfile } from "@/types/connection";
 
 // Psiphon's published egress regions. "" = automatic. The core treats a
-// choice as a hard filter, so a region with no current exit won't connect.
+// choice as a hard filter, so a region with no current exit won't
+// connect — retry with Automatic.
 const REGIONS: [string, string][] = [
   ["", "Automatic"],
   ["AE", "UAE"], ["AR", "Argentina"], ["AT", "Austria"], ["AU", "Australia"],
@@ -27,11 +29,19 @@ const REGIONS: [string, string][] = [
   ["US", "United States"], ["VN", "Vietnam"], ["ZA", "South Africa"],
 ];
 
+const MODES: Record<ConnectionProfile["psiphon_mode"], string> = {
+  auto: "Automatic shape",
+  cdn: "Fronted meek only (CDN)",
+  direct: "Direct (no fronting)",
+};
+
 export function PsiphonOptions() {
   const status = useConnectionStore((s) => s.status);
   const extra = useConnectionStore((s) => s.profile.extra_transport);
   const region = useConnectionStore((s) => s.profile.psiphon_region);
   const setRegion = useConnectionStore((s) => s.setPsiphonRegion);
+  const mode = useConnectionStore((s) => s.profile.psiphon_mode);
+  const setMode = useConnectionStore((s) => s.setPsiphonMode);
 
   const locked = status.state !== "Idle" && status.state !== "Error";
   const isPsiphon =
@@ -51,6 +61,22 @@ export function PsiphonOptions() {
           {REGIONS.map(([code, name]) => (
             <SelectItem key={code} value={code}>
               {code === "" ? name : `${name} (${code})`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={mode}
+        onValueChange={(v) => setMode(v as ConnectionProfile["psiphon_mode"])}
+        disabled={disabled}
+      >
+        <SelectTrigger size="sm" className={trigger} aria-label="Psiphon shape">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {(Object.keys(MODES) as ConnectionProfile["psiphon_mode"][]).map((m) => (
+            <SelectItem key={m} value={m}>
+              {MODES[m]}
             </SelectItem>
           ))}
         </SelectContent>

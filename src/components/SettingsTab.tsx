@@ -14,7 +14,7 @@ import { ExtraTransportSelect } from "@/components/ExtraTransportSelect";
 import { PsiphonOptions } from "@/components/PsiphonOptions";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
-import { TextOpt, SwitchRow, SelectOpt } from "@/components/fields";
+import { TextOpt, AreaOpt, SwitchRow, SelectOpt } from "@/components/fields";
 import { useConnectionStore as connectionStore } from "@/state/connectionStore";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +56,34 @@ function Section({ icon, title, stamp, defaultOpen, children }: { icon: ReactNod
         <div className="flex flex-col gap-4 border-t border-white/5 pt-3 light:border-black/5">{children}</div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/**
+ * Skips Tor's ~75s direct attempt and goes straight to bridges. Only
+ * enabled with a Tor mode selected above (the backend gates the flag the
+ * same way) — on a network that blocks Tor outright, direct is futile:
+ * observed stuck at 15% fetching consensus.
+ */
+function TorBridgesRow() {
+  const status = connectionStore((s) => s.status);
+  const extra = connectionStore((s) => s.profile.extra_transport);
+  const torBridges = connectionStore((s) => s.profile.tor_bridges);
+  const setTorBridges = connectionStore((s) => s.setTorBridges);
+
+  const locked = status.state !== "Idle" && status.state !== "Error";
+  const isTor = extra === "tor" || extra === "tor_reverse" || extra === "tor_only";
+
+  return (
+    <div className="flex items-center justify-between pt-1">
+      <span className="text-xs text-muted-foreground">Tor: straight to bridges</span>
+      <Switch
+        checked={torBridges}
+        onCheckedChange={setTorBridges}
+        disabled={locked || !isTor}
+        aria-label="Skip Tor direct attempt, use bridges immediately"
+      />
+    </div>
   );
 }
 
@@ -109,7 +137,48 @@ export function SettingsTab() {
         <FieldRow label="Extra transport"
           tooltip="Built-in Tor or Psiphon: carried inside the tunnel (exit on its own listener, 1819 keeps WARP), used to reach the tunnel, or on its own. Reverse modes force MASQUE. Needs pt/ bundled.">
           <ExtraTransportSelect />
+          <TorBridgesRow />
           <PsiphonOptions />
+        </FieldRow>
+      </Section>
+
+      <Section icon={<Network className="size-4" />} title="Tor options" stamp="relays · bridges · listener">
+        <FieldRow label="Relays mode"
+          tooltip="auto = bridgedb + onionoo relays alongside plain Tor; only = relays at once (skips the plain attempt); off = never. A count (e.g. 80) limits the pool.">
+          <TextOpt value={p.tor_relays} onChange={api.setTorRelays} disabled={locked} placeholder="auto" label="Tor relays mode" mono />
+        </FieldRow>
+        <FieldRow label="Custom bridges"
+          tooltip="Your own bridge lines, one per line — same shape torrc uses. Tried instead of (or before) fetched ones.">
+          <AreaOpt value={p.tor_bridge} onChange={api.setTorBridge} disabled={locked} placeholder={"obfs4 1.2.3.4:443 FINGERPRINT cert=... iat-mode=0"} label="Custom Tor bridges" />
+        </FieldRow>
+        <FieldRow label="Bridge file / Tor listener"
+          tooltip="Bridge file: path to a torrc-shaped file. Tor listener: where the Tor exit of --tor/--tor-reverse serves (default 127.0.0.1:1820 — keep clear of the HTTP port!).">
+          <div className="flex flex-col gap-1.5">
+            <TextOpt value={p.tor_bridge_file} onChange={api.setTorBridgeFile} disabled={locked} placeholder="Bridge file path (optional)" label="Tor bridge file" mono />
+            <TextOpt value={p.tor_bind} onChange={api.setTorBind} disabled={locked} placeholder="127.0.0.1:1820" label="Tor exit listener" mono />
+          </div>
+        </FieldRow>
+      </Section>
+
+      <Section icon={<Network className="size-4" />} title="Psiphon files" stamp="config · fronting · listener">
+        <FieldRow label="Custom config / server entries"
+          tooltip="Your own psiphon JSON laid over the built-in one (credentials/server lists), or a seed server-entries file so the first connection skips the list download.">
+          <div className="flex flex-col gap-1.5">
+            <TextOpt value={p.psiphon_config} onChange={api.setPsiphonConfig} disabled={locked} placeholder="Custom config path (optional)" label="Psiphon custom config" mono />
+            <TextOpt value={p.psiphon_server_entries} onChange={api.setPsiphonServerEntries} disabled={locked} placeholder="Server entries file (optional)" label="Psiphon server entries" mono />
+          </div>
+        </FieldRow>
+        <FieldRow label="CDN fronting"
+          tooltip="Override which CDN edges / names / sets the fronting scan tries. Empty = built-in lists.">
+          <div className="flex flex-col gap-1.5">
+            <TextOpt value={p.psiphon_cdn_ips} onChange={api.setPsiphonCdnIps} disabled={locked} placeholder="CDN edge IPs (optional)" label="Psiphon CDN IPs" mono />
+            <TextOpt value={p.psiphon_cdn_sni} onChange={api.setPsiphonCdnSni} disabled={locked} placeholder="Server names (optional)" label="Psiphon CDN SNI" mono />
+            <TextOpt value={p.psiphon_cdn_sets} onChange={api.setPsiphonCdnSets} disabled={locked} placeholder="Edge sets, e.g. cloudflare,fastly (optional)" label="Psiphon CDN sets" />
+          </div>
+        </FieldRow>
+        <FieldRow label="Psiphon listener"
+          tooltip="Where the Psiphon exit of --psiphon/--psiphon-reverse serves (default 127.0.0.1:1821).">
+          <TextOpt value={p.psiphon_bind} onChange={api.setPsiphonBind} disabled={locked} placeholder="127.0.0.1:1821" label="Psiphon exit listener" mono />
         </FieldRow>
       </Section>
 

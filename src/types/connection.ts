@@ -60,6 +60,22 @@ export interface ConnectionProfile {
   extra_transport: ExtraTransport;
   /** Psiphon egress region (ISO alpha-2, "" = automatic). */
   psiphon_region: string;
+  /** Skip Tor's direct attempt, go straight to bridges. */
+  tor_bridges: boolean;
+  /** Psiphon shape: automatic / fronted-meek-only / direct. */
+  psiphon_mode: "auto" | "cdn" | "direct";
+  /** v2.2 Tor extras. */
+  tor_relays: string;
+  tor_bridge: string;
+  tor_bridge_file: string;
+  tor_bind: string;
+  /** v2.2 Psiphon extras. */
+  psiphon_config: string;
+  psiphon_cdn_ips: string;
+  psiphon_cdn_sni: string;
+  psiphon_cdn_sets: string;
+  psiphon_server_entries: string;
+  psiphon_bind: string;
   /** v2.2 forced peers (empty = scan). */
   peer: string;
   wg_peer: string;

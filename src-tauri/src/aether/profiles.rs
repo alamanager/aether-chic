@@ -222,6 +222,30 @@ pub struct ConnectionProfile {    pub protocol: Protocol,
     pub netstack_tx: String,
     #[serde(default = "default_true")]
     pub route_sniff: bool,
+    /// v2.2 Tor extras: relays mode (auto/only/off/count), custom bridge
+    /// lines (one per line), bridge file, and the Tor exit listener.
+    #[serde(default)]
+    pub tor_relays: String,
+    #[serde(default)]
+    pub tor_bridge: String,
+    #[serde(default)]
+    pub tor_bridge_file: String,
+    #[serde(default)]
+    pub tor_bind: String,
+    /// v2.2 Psiphon extras: custom config overlay, CDN fronting lists,
+    /// seed server entries, and the Psiphon exit listener.
+    #[serde(default)]
+    pub psiphon_config: String,
+    #[serde(default)]
+    pub psiphon_cdn_ips: String,
+    #[serde(default)]
+    pub psiphon_cdn_sni: String,
+    #[serde(default)]
+    pub psiphon_cdn_sets: String,
+    #[serde(default)]
+    pub psiphon_server_entries: String,
+    #[serde(default)]
+    pub psiphon_bind: String,
     /// Aether ≥1.7.0: dial out through another proxy (chain behind a VPN or
     /// proxy app already on the machine). Accepts socks5://, http:// or a
     /// bare host:port (SOCKS5), with credentials in the URL.
@@ -237,6 +261,34 @@ pub struct ConnectionProfile {    pub protocol: Protocol,
     /// filter, so a region with no current exit won't connect — retry Auto.
     #[serde(default)]
     pub psiphon_region: String,
+    /// Skip Tor's plain attempt and go straight to bridges (core tries ~75s
+    /// of direct first, which is futile on a network that blocks Tor —
+    /// observed stuck fetching consensus). Only forwarded with a Tor mode.
+    #[serde(default)]
+    pub tor_bridges: bool,
+    /// Psiphon shape: automatic, fronted-meek-only (cdn, for networks that
+    /// block the rest) or no fronting (direct).
+    #[serde(default)]
+    pub psiphon_mode: PsiphonMode,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PsiphonMode {
+    #[default]
+    Auto,
+    Cdn,
+    Direct,
+}
+
+impl PsiphonMode {
+    pub fn as_flag(&self) -> Option<&'static str> {
+        match self {
+            PsiphonMode::Auto => None,
+            PsiphonMode::Cdn => Some("cdn"),
+            PsiphonMode::Direct => Some("direct"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -320,32 +372,47 @@ pub fn http_proxy_socket(bind_address: &str, http_port: &str) -> std::net::Socke
 }
 
 /// Fixed Tor/Psiphon exit listeners for chain/reverse modes (core
-/// defaults — explicit fields were dropped to match the reference
-/// implementation; only-modes serve on --bind itself).
+/// defaults when the explicit fields are empty; only-modes serve on
+/// --bind itself).
 pub const TOR_BIND: &str = "127.0.0.1:1820";
 pub const PSIPHON_BIND: &str = "127.0.0.1:1821";
 
-/// Effective Tor exit listener for inside/reverse modes. None otherwise
+/// Effective Tor exit listener for inside/reverse modes: explicit field
+/// or core default, loopback-mapped for display. None otherwise
 /// (tor-only serves on --bind itself).
-pub fn tor_exit_addr(extra: &ExtraTransport) -> Option<std::net::SocketAddr> {
+pub fn tor_exit_addr(extra: &ExtraTransport, raw_bind: &str) -> Option<std::net::SocketAddr> {
     if !matches!(
         extra,
         ExtraTransport::Tor | ExtraTransport::TorReverse
     ) {
         return None;
     }
-    TOR_BIND.parse().ok()
+    let v = if raw_bind.trim().is_empty() {
+        TOR_BIND
+    } else {
+        raw_bind.trim()
+    };
+    v.parse::<std::net::SocketAddr>()
+        .ok()
+        .map(|s| super::status::client_addr(&s))
 }
 
 /// Effective Psiphon exit listener for inside/reverse modes.
-pub fn psi_exit_addr(extra: &ExtraTransport) -> Option<std::net::SocketAddr> {
+pub fn psi_exit_addr(extra: &ExtraTransport, raw_bind: &str) -> Option<std::net::SocketAddr> {
     if !matches!(
         extra,
         ExtraTransport::Psiphon | ExtraTransport::PsiphonReverse
     ) {
         return None;
     }
-    PSIPHON_BIND.parse().ok()
+    let v = if raw_bind.trim().is_empty() {
+        PSIPHON_BIND
+    } else {
+        raw_bind.trim()
+    };
+    v.parse::<std::net::SocketAddr>()
+        .ok()
+        .map(|s| super::status::client_addr(&s))
 }
 
 impl ConnectionProfile {
@@ -402,11 +469,11 @@ impl ConnectionProfile {
     /// 1821 by default, explicit field wins), loopback-mapped for display.
     /// None otherwise — only-modes serve on --bind itself.
     pub fn tor_exit_addr(&self) -> Option<std::net::SocketAddr> {
-        tor_exit_addr(&self.extra_transport)
+        tor_exit_addr(&self.extra_transport, &self.tor_bind)
     }
 
     pub fn psi_exit_addr(&self) -> Option<std::net::SocketAddr> {
-        psi_exit_addr(&self.extra_transport)
+        psi_exit_addr(&self.extra_transport, &self.psiphon_bind)
     }
 
     /// Ports that must answer before the GUI reports connected: the SOCKS
@@ -492,32 +559,44 @@ impl ConnectionProfile {
     }
 
     /// Resolved HTTP port: custom wins unless invalid or colliding with
-    /// SOCKS; else SOCKS+1 — except Tor inside/reverse, where the Tor exit
-    /// owns 1820 and HTTP moves to 1822.
+    /// SOCKS or a Tor/Psiphon exit listener (ports overlap across bind IPs,
+    /// so the comparison is by port). Otherwise SOCKS+1 — except Tor
+    /// inside/reverse, where the Tor exit owns 1820 and HTTP moves to 1822.
     fn frontend_http_port(&self) -> u16 {
         let socks: std::net::SocketAddr = self
             .bind_address
             .parse()
             .unwrap_or_else(|_| "127.0.0.1:1819".parse().expect("literal parses"));
+        let tor_exit = self.tor_exit_addr().map(|s| s.port());
+        let psi_exit = self.psi_exit_addr().map(|s| s.port());
+        let taken = |p: u16| p == socks.port() || Some(p) == tor_exit || Some(p) == psi_exit;
+        if let Ok(p) = self.http_port.trim().parse::<u16>() {
+            if p >= 1 && !taken(p) {
+                return p;
+            }
+        }
         let tor = matches!(
             self.extra_transport,
             ExtraTransport::Tor | ExtraTransport::TorReverse
         );
-        match self.http_port.trim().parse::<u16>() {
-            Ok(p) if p >= 1 && p != socks.port() => p,
-            _ => {
-                if tor {
-                    1822
-                } else {
-                    let q = socks.port().wrapping_add(1);
-                    if q == 0 {
-                        1820
-                    } else {
-                        q
-                    }
-                }
+        let mut h = if tor {
+            1822
+        } else {
+            socks.port().wrapping_add(1)
+        };
+        if h == 0 {
+            h = 1820;
+        }
+        for _ in 0..4 {
+            if !taken(h) {
+                break;
+            }
+            h = h.wrapping_add(1);
+            if h == 0 {
+                h = 1820;
             }
         }
+        h
     }
 
     /// CLI flags for Aether ≥1.1.1 — the whole profile is passed up front so
@@ -579,6 +658,11 @@ impl ConnectionProfile {
         if let Some(flag) = self.extra_transport.as_flag() {
             args.push(flag.into());
         }
+        // Gated on a Tor mode: without one the flag is meaningless and the
+        // core might reject it.
+        if self.tor_bridges && self.is_tor() {
+            args.push("--tor-bridges".into());
+        }
         // Psiphon exit country, gated on a Psiphon mode and validated to a
         // 2-letter code (the core treats it as a hard filter).
         if matches!(
@@ -589,6 +673,10 @@ impl ConnectionProfile {
             if region.len() == 2 && region.bytes().all(|b| b.is_ascii_alphabetic()) {
                 args.push("--psiphon-region".into());
                 args.push(region);
+            }
+            if let Some(mode) = self.psiphon_mode.as_flag() {
+                args.push("--psiphon-mode".into());
+                args.push(mode.into());
             }
         }
         if !self.dns.trim().is_empty() {
@@ -679,6 +767,42 @@ impl ConnectionProfile {
         }
         if self.disable_grease {
             args.push("--disable-grease".into());
+        }
+        // Extra Tor controls (relays/bridges/bind), each gated on a Tor
+        // mode like --tor-bridges above.
+        if self.is_tor() {
+            if !self.tor_relays.trim().is_empty() {
+                args.push("--tor-relays".into());
+                args.push(self.tor_relays.trim().into());
+            }
+            for line in self.tor_bridge.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                args.push("--tor-bridge".into());
+                args.push(line.into());
+            }
+            if !self.tor_bridge_file.trim().is_empty() {
+                args.push("--tor-bridge-file".into());
+                args.push(self.tor_bridge_file.trim().into());
+            }
+            if !self.tor_bind.trim().is_empty() {
+                args.push("--tor-bind".into());
+                args.push(self.tor_bind.trim().into());
+            }
+        }
+        // Extra Psiphon controls, gated on a Psiphon mode.
+        if self.is_psiphon() {
+            for (flag, val) in [
+                ("--psiphon-config", &self.psiphon_config),
+                ("--psiphon-cdn-ips", &self.psiphon_cdn_ips),
+                ("--psiphon-cdn-sni", &self.psiphon_cdn_sni),
+                ("--psiphon-cdn-sets", &self.psiphon_cdn_sets),
+                ("--psiphon-server-entries", &self.psiphon_server_entries),
+                ("--psiphon-bind", &self.psiphon_bind),
+            ] {
+                if !val.trim().is_empty() {
+                    args.push(flag.into());
+                    args.push(val.trim().into());
+                }
+            }
         }
         args
     }
@@ -941,6 +1065,114 @@ mod tests {
     }
 
     #[test]
+    fn psiphon_mode_forwarded() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::Psiphon;
+        p.psiphon_mode = PsiphonMode::Cdn;
+        let args = p.as_args();
+        let j = args.iter().position(|a| a == "--psiphon-mode").expect("missing mode");
+        assert_eq!(args.get(j + 1).map(String::as_str), Some("cdn"));
+        p.psiphon_mode = PsiphonMode::Auto;
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--psiphon-mode"));
+        // Gated: never with a Tor mode.
+        p.psiphon_mode = PsiphonMode::Direct;
+        p.extra_transport = ExtraTransport::TorOnly;
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--psiphon-mode"));
+    }
+
+    #[test]
+    fn tor_bridges_only_with_tor_mode() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::TorOnly;
+        p.tor_bridges = true;
+        let args = p.as_args();
+        assert!(args.iter().any(|a| a == "--tor-bridges"));
+        p.extra_transport = ExtraTransport::PsiphonOnly;
+        let args = p.as_args();
+        assert!(!args.iter().any(|a| a == "--tor-bridges"));
+    }
+
+    #[test]
+    fn tor_extras_forwarded() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::Tor;
+        p.tor_relays = "only".into();
+        p.tor_bridge = "obfs4 1.2.3.4:443 FP cert=x iat-mode=0\n\nobfs4 5.6.7.8:443 FP2 cert=y".into();
+        p.tor_bridge_file = "bridges.txt".into();
+        p.tor_bind = "127.0.0.1:1900".into();
+        let args = p.as_args();
+        let i = args.iter().position(|a| a == "--tor-relays").expect("missing relays");
+        assert_eq!(args.get(i + 1).map(String::as_str), Some("only"));
+        // One flag per bridge line; blanks skipped (2 non-empty lines).
+        let bridges: Vec<_> = args.iter().filter(|a| *a == "--tor-bridge").collect();
+        assert_eq!(bridges.len(), 2);
+        assert!(args.iter().any(|a| a == "bridges.txt"));
+        let j = args.iter().position(|a| a == "--tor-bind").expect("missing bind");
+        assert_eq!(args.get(j + 1).map(String::as_str), Some("127.0.0.1:1900"));
+        // Custom exit moves the reported address; HTTP stays clear of it.
+        assert_eq!(p.tor_exit_addr().map(|s| s.port()), Some(1900));
+        assert_eq!(p.primary_addr(), "127.0.0.1:1900");
+        assert_eq!(p.frontend_http_addr().to_string(), "127.0.0.1:1822");
+    }
+
+    #[test]
+    fn psiphon_extras_forwarded() {
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::Psiphon;
+        p.psiphon_config = "custom.json".into();
+        p.psiphon_cdn_ips = "1.1.1.1".into();
+        p.psiphon_server_entries = "entries.dat".into();
+        p.psiphon_bind = "127.0.0.1:1920".into();
+        let args = p.as_args();
+        for want in ["--psiphon-config", "custom.json", "--psiphon-cdn-ips", "1.1.1.1",
+            "--psiphon-server-entries", "entries.dat", "--psiphon-bind", "127.0.0.1:1920"] {
+            assert!(args.iter().any(|a| a == want), "missing {want}: {args:?}");
+        }
+        assert_eq!(p.psi_exit_addr().map(|s| s.port()), Some(1920));
+        assert_eq!(p.primary_addr(), "127.0.0.1:1920");
+        assert_eq!(p.frontend_http_addr().to_string(), "127.0.0.1:1820");
+    }
+
+    #[test]
+    fn custom_exits_move_http_aside() {
+        // The anti-misconnect test: a custom exit listener must move the
+        // HTTP frontend (and readiness checks) with it, never strand them
+        // on a port the core no longer serves.
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::Tor;
+        p.tor_bind = "127.0.0.1:1822".into();
+        assert_eq!(p.tor_exit_addr().map(|s| s.port()), Some(1822));
+        assert_eq!(p.frontend_http_addr().to_string(), "127.0.0.1:1823");
+        assert_eq!(p.flag_http_addr(), "127.0.0.1:1823");
+        assert!(p.ready_addrs().iter().any(|a| a.port() == 1822));
+        let mut q = ConnectionProfile::default();
+        q.extra_transport = ExtraTransport::Psiphon;
+        q.psiphon_bind = "127.0.0.1:1820".into();
+        assert_eq!(q.psi_exit_addr().map(|s| s.port()), Some(1820));
+        assert_eq!(q.frontend_http_addr().to_string(), "127.0.0.1:1821");
+        // Garbage bind falls back to the core default, never panics.
+        q.psiphon_bind = "garbage".into();
+        assert_eq!(q.psi_exit_addr(), None);
+    }
+
+    #[test]
+    fn empty_extras_emit_nothing() {
+        // Empty fields (the MatinSenPai default) forward zero extra flags —
+        // same argv as before this restore.
+        let mut p = ConnectionProfile::default();
+        p.extra_transport = ExtraTransport::Tor;
+        let args = p.as_args();
+        assert!(args.iter().any(|a| a == "--tor"));
+        assert!(!args.iter().any(|a| a == "--tor-bind"
+            || a == "--tor-bridge"
+            || a == "--tor-bridge-file"
+            || a == "--tor-relays"
+            || a == "--tor-bridges"));
+    }
+
+    #[test]
     fn zero_trust_email_is_provided_as_an_environment_value() {        let p = ConnectionProfile {
             zero_trust_team: "acme".into(),
             access_email: "me@example.com".into(),
@@ -1002,9 +1234,21 @@ impl Default for ConnectionProfile {
             netstack_rx: String::new(),
             netstack_tx: String::new(),
             route_sniff: true,
+            tor_relays: String::new(),
+            tor_bridge: String::new(),
+            tor_bridge_file: String::new(),
+            tor_bind: String::new(),
+            psiphon_config: String::new(),
+            psiphon_cdn_ips: String::new(),
+            psiphon_cdn_sni: String::new(),
+            psiphon_cdn_sets: String::new(),
+            psiphon_server_entries: String::new(),
+            psiphon_bind: String::new(),
             upstream: String::new(),
             extra_transport: ExtraTransport::None,
             psiphon_region: String::new(),
+            tor_bridges: false,
+            psiphon_mode: PsiphonMode::Auto,
         }
     }
 }
