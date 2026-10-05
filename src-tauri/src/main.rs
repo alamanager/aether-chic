@@ -44,6 +44,7 @@ fn main() {
             commands::get_system_proxy,
             commands::set_system_proxy,
             clients::proxy_clients,
+            clients::resolve_host,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

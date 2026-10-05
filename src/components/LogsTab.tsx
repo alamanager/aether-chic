@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Copy, Check, Trash2 } from "lucide-react";
 import { useConnectionStore } from "@/state/connectionStore";
+
+/** Render window: full history stays in the store for copy, but only the
+ * tail hits the DOM — 500 <p> nodes re-created per 100ms batch was the
+ * main scroll jank. */
+const RENDER_TAIL = 150;
 
 function CopyButton({ logs }: { logs: { line: string }[] }) {
   const [done, setDone] = useState(false);
@@ -24,21 +29,34 @@ function CopyButton({ logs }: { logs: { line: string }[] }) {
   );
 }
 
+const LogRow = memo(function LogRow({ line }: { line: string }) {
+  return <p>{line}</p>;
+});
+
 /**
- * Dedicated log view: the raw core output stream with autoscroll that
- * yields to manual scrolling, plus copy and clear actions.
+ * Dedicated log view: windowed tail render with stable keys, rAF-batched
+ * autoscroll (scrollTop writes no longer fight React's commit phase),
+ * plus copy and clear actions.
  */
 export function LogsTab() {
   const logs = useConnectionStore((s) => s.logs);
   const clearLogs = useConnectionStore((s) => s.clearLogs);
   const [autoScroll, setAutoScroll] = useState(true);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef(0);
 
   useEffect(() => {
-    if (autoScroll && viewportRef.current) {
-      viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
-    }
+    if (!autoScroll) return;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const el = viewportRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(rafRef.current);
   }, [logs, autoScroll]);
+
+  const tail = logs.length > RENDER_TAIL ? logs.slice(-RENDER_TAIL) : logs;
+  const skipped = logs.length - tail.length;
 
   return (
     <div className="glass flex max-h-full w-full max-w-sm flex-col rounded-2xl p-3">
@@ -69,7 +87,14 @@ export function LogsTab() {
         {logs.length === 0 ? (
           <p className="text-status-idle">No output yet — connect to see the core log.</p>
         ) : (
-          logs.map((l, i) => <p key={i}>{l.line}</p>)
+          <>
+            {skipped > 0 && (
+              <p className="text-status-idle">… {skipped} older lines hidden (copy keeps all)</p>
+            )}
+            {tail.map((l, i) => (
+              <LogRow key={`${l.timestamp}-${i}`} line={l.line} />
+            ))}
+          </>
         )}
       </div>
       {!autoScroll && (

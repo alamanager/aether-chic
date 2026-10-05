@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Area,
   CartesianGrid,
@@ -41,6 +41,18 @@ export function TransferGraph() {
     }
     return null;
   }, [samples]);
+
+  // Re-animating 120 points on every ~2s sample was visible jank: animate
+  // the first paint with data only, then run static updates.
+  const hasData = samples.length >= 2;
+  const [settled, setSettled] = useState(false);
+  /* eslint-disable react-hooks/set-state-in-effect -- one-shot latch, fires
+   * once when the first data arrives; established codebase pattern. */
+  useEffect(() => {
+    if (hasData && !settled) setSettled(true);
+  }, [hasData, settled]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+  const animate = !reduced && !settled;
 
   const tipStyle = {
     background: "var(--color-card)",
@@ -111,7 +123,7 @@ export function TransferGraph() {
                 connectNulls={false}
                 dot={false}
                 activeDot={{ r: 3 }}
-                isAnimationActive={!reduced}
+                isAnimationActive={animate}
               />
               <Area
                 type="monotone"
@@ -124,7 +136,7 @@ export function TransferGraph() {
                 connectNulls={false}
                 dot={false}
                 activeDot={{ r: 3 }}
-                isAnimationActive={!reduced}
+                isAnimationActive={animate}
               />
               {gapAt !== null && (
                 <ReferenceDot x={gapAt} y={0} r={4} fill="var(--color-status-error)" stroke="none" />

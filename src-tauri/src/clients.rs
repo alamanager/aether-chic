@@ -98,8 +98,7 @@ fn query_table() -> Vec<TcpRow> {
 }
 
 #[tauri::command]
-pub fn proxy_clients(app: AppHandle) -> Vec<EndpointClients> {
-    let profile = crate::aether::profiles::load(&app);
+pub fn proxy_clients(app: AppHandle) -> Vec<EndpointClients> {    let profile = crate::aether::profiles::load(&app);
     let socks_port = profile
         .bind_address
         .parse::<std::net::SocketAddr>()
@@ -123,6 +122,55 @@ pub fn proxy_clients(app: AppHandle) -> Vec<EndpointClients> {
         .iter()
         .map(|(label, port)| summarize(label, *port, &rows))
         .collect()
+}
+
+/// Best-effort device name for a LAN IP via reverse DNS. Home routers
+/// and phones usually answer nothing — then this is None and the UI
+/// shows the IP. Bounded by a hard timeout so a dead lookup can never
+/// hang the card; callers must cache per IP (one lookup per address).
+#[tauri::command]
+pub fn resolve_host(ip: String) -> Option<String> {
+    if is_loopback(&ip) || ip.trim().is_empty() {
+        return None;
+    }
+    let ip = ip.trim().to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut cmd = Command::new("powershell");
+        crate::cmd::silent(&mut cmd);
+        let out = cmd
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "[System.Net.Dns]::GetHostEntry('{ip}') | Select-Object HostName | ConvertTo-Json -Compress"
+                ),
+            ])
+            .output();
+        let _ = tx.send(out.ok());
+    });
+    let out = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .ok()?
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_host_json(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_host_json(json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let name = v.get("HostName")?.as_str()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    // A bare echo of the IP is not a name.
+    if name.parse::<std::net::IpAddr>().is_ok() {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 #[cfg(test)]
@@ -158,5 +206,17 @@ mod tests {
         let rows = parse_rows(r#"{"LocalPort":1819,"RemoteAddress":"10.0.0.2"}"#);
         assert_eq!(rows.len(), 1);
         assert_eq!(parse_rows("not json").len(), 0);
+    }
+
+    #[test]
+    fn host_json_parses() {
+        assert_eq!(
+            parse_host_json(r#"{"HostName":"phone.lan"}"#),
+            Some("phone.lan".to_string())
+        );
+        // Echoed IPs and blanks are not names.
+        assert_eq!(parse_host_json(r#"{"HostName":"192.168.1.5"}"#), None);
+        assert_eq!(parse_host_json(r#"{"HostName":"  "}"#), None);
+        assert_eq!(parse_host_json("garbage"), None);
     }
 }
