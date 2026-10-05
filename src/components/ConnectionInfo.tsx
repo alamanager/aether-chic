@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, Globe, MonitorUp, RefreshCw, Server } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useConnectionStore } from "@/state/connectionStore";
@@ -43,9 +44,6 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Local endpoints, derived synchronously from the profile — no waiting on
- * the backend, so the card renders identically before and after connect.
- * Unspecified binds map to loopback, mirroring the backend. */
 function addrsFromBind(bind: string): { socks: string; http: string } {
   let host = "127.0.0.1";
   let port = 1819;
@@ -66,27 +64,18 @@ function Row({
   value,
   onCopy,
   copied,
-  dimmed,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   onCopy?: () => void;
   copied?: boolean;
-  dimmed?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        "flex min-h-[52px] items-center gap-2.5 rounded-xl px-3 py-2 ring-1 transition-opacity",
-        dimmed
-          ? "bg-black/10 opacity-60 ring-white/5 light:bg-black/[0.03] light:ring-black/5"
-          : "bg-black/20 ring-white/10 light:bg-black/5 light:ring-black/10",
-      )}
-    >
-      <span className="text-muted-foreground">{icon}</span>
+    <div className="flex min-h-[50px] items-center gap-2.5 rounded-xl bg-black/25 px-3 py-2 ring-1 ring-white/10 light:bg-black/[0.04] light:ring-black/10">
+      <span className="text-[#a5b4fc]">{icon}</span>
       <span className="min-w-0 flex-1 text-left">
-        <span className="block text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        <span className="block text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
           {label}
         </span>
         <span className="block truncate font-mono text-xs text-foreground" dir="ltr">
@@ -108,12 +97,8 @@ function Row({
 }
 
 /**
- * Fixed-size proxy card, always mounted: same box in every state, so
- * connecting never shifts the layout. Addresses come straight from the
- * profile (no async wait), the switch works before connect, and the LIVE
- * chip flips on with the tunnel.
- * ponytail: public-IP lookup is a plain api.ipify.org fetch — swap for a
- * backend SOCKS-aware check if it ever proves unreliable.
+ * Live-session footer: rendered ONLY while an attempt is alive or connected
+ * (status UI earns its pixels). Same endpoints/IP/sysproxy logic as before.
  */
 export function ConnectionInfo() {
   const status = useConnectionStore((s) => s.status);
@@ -125,17 +110,17 @@ export function ConnectionInfo() {
   const [proxyBusy, setProxyBusy] = useState(false);
   const [proxyHint, setProxyHint] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  // Which attempt the auto-apply below already ran for (a ref: re-running
-  // on every render would flip the switch in a loop).
   const autoFor = useRef(0);
 
+  const live =
+    status.state === "Launching" ||
+    status.state === "Connecting" ||
+    status.state === "Reconnecting" ||
+    status.state === "Connected";
   const connected = status.state === "Connected";
   const extra = useConnectionStore((s) => s.profile.extra_transport);
   const httpPortField = useConnectionStore((s) => s.profile.http_port);
   const fromBind = addrsFromBind(bind);
-  // Primary endpoint: the backend reports it while connected (in chain
-  // modes that's the Tor/Psiphon exit); otherwise predict with the same
-  // rule. Inline state checks so TS narrows the union.
   const TOR_EXIT = "127.0.0.1:1820";
   const PSI_EXIT = "127.0.0.1:1821";
   const isTorChain = extra === "tor" || extra === "tor_reverse";
@@ -148,9 +133,6 @@ export function ConnectionInfo() {
         : isPsiChain
           ? PSI_EXIT
           : fromBind.socks;
-  // HTTP frontend mirrors the backend: custom port wins (unless colliding
-  // with SOCKS); tor modes default to 1822 since the exit owns 1820; else
-  // SOCKS+1. Same host as the SOCKS row.
   const portOf = (a: string): number | null => {
     const m = /:(\d+)\s*$/.exec(a);
     return m ? Number(m[1]) : null;
@@ -162,14 +144,15 @@ export function ConnectionInfo() {
   const socksPort = portOf(socksAddr) ?? portOf(fromBind.socks) ?? 1819;
   const customPort = (() => {
     const n = Number(httpPortField);
-    return (
-      httpPortField.trim() !== "" && Number.isInteger(n) && n >= 1 && n <= 65535 && n !== socksPort
-        ? n
-        : null
-    );
+    return httpPortField.trim() !== "" &&
+      Number.isInteger(n) &&
+      n >= 1 &&
+      n <= 65535 &&
+      n !== socksPort
+      ? n
+      : null;
   })();
-  const httpPort =
-    customPort ?? (isTorChain ? 1822 : socksPort >= 65535 ? 1820 : socksPort + 1);
+  const httpPort = customPort ?? (isTorChain ? 1822 : socksPort >= 65535 ? 1820 : socksPort + 1);
   const httpAddr = `${hostOf(fromBind.socks)}:${httpPort}`;
   const torExit = isTorChain ? TOR_EXIT : null;
   const psiExit = isPsiChain ? PSI_EXIT : null;
@@ -200,8 +183,6 @@ export function ConnectionInfo() {
         setSysProxy(on);
         writeSysProxyPref(on);
       } catch (e) {
-        // Backend without the sysproxy module (or a non-Windows target):
-        // leave the switch off and explain the manual path.
         setSysProxy(false);
         setProxyHint(
           `Auto-switch unavailable (${String(e).slice(0, 90)}). Set it manually: Windows Settings → Proxy → ${httpAddr}`,
@@ -213,9 +194,6 @@ export function ConnectionInfo() {
     [httpAddr, socksAddr],
   );
 
-  // Ground truth once (backend may predate the command), then per attempt:
-  // refresh IP, auto-apply the persisted choice, and never leave Windows
-  // pointing at a dead port after disconnect.
   useEffect(() => {
     invoke<boolean>("get_system_proxy")
       .then(setSysProxy)
@@ -223,6 +201,7 @@ export function ConnectionInfo() {
   }, []);
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    if (!live) return;
     if (connected) {
       void fetchIp();
       if (readSysProxyPref() && autoFor.current !== attemptId) {
@@ -236,7 +215,7 @@ export function ConnectionInfo() {
         invoke("set_system_proxy", { enabled: false, server: "" }).catch(() => {});
       }
     }
-  }, [connected, attemptId, sysProxy, fetchIp, toggleSysProxy]);
+  }, [live, connected, attemptId, sysProxy, fetchIp, toggleSysProxy]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const doCopy = async (which: string, text: string) => {
@@ -247,106 +226,79 @@ export function ConnectionInfo() {
   };
 
   return (
-    <div className="glass flex w-full max-w-sm flex-col gap-2 rounded-2xl p-3">
-      <div className="flex h-6 items-center justify-between px-1">
-        <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
-          Local proxy
-        </span>
-        <span
-          className={cn(
-            "flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wider",
-            connected
-              ? "bg-status-connected/15 text-status-connected"
-              : "bg-surface-3 text-muted-foreground",
+    <AnimatePresence initial={false}>
+      {live && (
+        <motion.div
+          key="session-footer"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 8 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          className="glass flex w-full max-w-sm flex-col gap-2 rounded-2xl p-3"
+        >
+          <div className="flex h-6 items-center justify-between px-1">
+            <span className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground uppercase">
+              Live session
+            </span>
+            <span
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wider",
+                connected ? "bg-status-connected/15 text-status-connected" : "bg-surface-3 text-muted-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  connected ? "bg-status-connected" : "anim-glow-fast bg-status-connecting",
+                )}
+                aria-hidden
+              />
+              {connected ? "LIVE" : "WORKING"}
+            </span>
+          </div>
+          <Row icon={<Server className="size-4" />} label="SOCKS5" value={socksAddr}
+            onCopy={() => void doCopy("socks", socksAddr)} copied={copied === "socks"} />
+          <Row icon={<Server className="size-4" />} label="HTTP" value={httpAddr}
+            onCopy={() => void doCopy("http", httpAddr)} copied={copied === "http"} />
+          {torExit && (
+            <Row icon={<Server className="size-4" />} label="Tor exit" value={torExit}
+              onCopy={() => void doCopy("tor", torExit)} copied={copied === "tor"} />
           )}
-        >
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              connected ? "bg-status-connected" : "bg-status-idle",
-            )}
-            aria-hidden
-          />
-          {connected ? "LIVE" : "OFFLINE"}
-        </span>
-      </div>
-      <Row
-        icon={<Server className="size-4" />}
-        label="SOCKS5 proxy"
-        value={socksAddr}
-        onCopy={() => void doCopy("socks", socksAddr)}
-        copied={copied === "socks"}
-        dimmed={!connected}
-      />
-      <Row
-        icon={<Server className="size-4" />}
-        label="HTTP proxy"
-        value={httpAddr}
-        onCopy={() => void doCopy("http", httpAddr)}
-        copied={copied === "http"}
-        dimmed={!connected}
-      />
-      {torExit && (
-        <Row
-          icon={<Server className="size-4" />}
-          label="Tor exit"
-          value={torExit}
-          onCopy={() => void doCopy("tor", torExit)}
-          copied={copied === "tor"}
-          dimmed={!connected}
-        />
+          {psiExit && (
+            <Row icon={<Server className="size-4" />} label="Psiphon exit" value={psiExit}
+              onCopy={() => void doCopy("psi", psiExit)} copied={copied === "psi"} />
+          )}
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <Row icon={<Globe className="size-4" />} label="Exit IP"
+                value={ipLoading ? "measuring…" : (publicIp ?? "—")}
+                onCopy={publicIp ? () => void doCopy("ip", publicIp) : undefined}
+                copied={copied === "ip"} />
+            </div>
+            <button
+              type="button"
+              onClick={() => void fetchIp()}
+              aria-label="Re-measure exit IP"
+              className="grid size-11 shrink-0 place-items-center self-stretch rounded-xl text-muted-foreground ring-1 ring-white/10 transition-colors hover:bg-surface-3 hover:text-foreground"
+            >
+              <RefreshCw className={`size-4 ${ipLoading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+          <div className="flex min-h-[44px] items-center justify-between rounded-xl px-1">
+            <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <MonitorUp className="size-4" />
+              System proxy
+            </span>
+            <Switch
+              checked={sysProxy ?? false}
+              disabled={proxyBusy || sysProxy === null}
+              onCheckedChange={(on) => void toggleSysProxy(on)}
+              aria-label="Route system traffic through the tunnel (Windows system proxy)"
+            />
+          </div>
+          {proxyHint && <p className="px-1 text-[11px] leading-5 text-muted-foreground">{proxyHint}</p>}
+        </motion.div>
       )}
-      {psiExit && (
-        <Row
-          icon={<Server className="size-4" />}
-          label="Psiphon exit"
-          value={psiExit}
-          onCopy={() => void doCopy("psi", psiExit)}
-          copied={copied === "psi"}
-          dimmed={!connected}
-        />
-      )}
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <Row
-            icon={<Globe className="size-4" />}
-            label="Visible IP"
-            value={ipLoading ? "checking…" : (publicIp ?? "—")}
-            onCopy={publicIp ? () => void doCopy("ip", publicIp) : undefined}
-            copied={copied === "ip"}
-            dimmed={!connected}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => void fetchIp()}
-          aria-label="Refresh public IP"
-          className="grid size-11 shrink-0 place-items-center self-stretch rounded-xl text-muted-foreground ring-1 ring-white/10 transition-colors hover:bg-surface-3 hover:text-foreground"
-        >
-          <RefreshCw className={`size-4 ${ipLoading ? "animate-spin" : ""}`} />
-        </button>
-      </div>
-      <div className="flex min-h-[44px] items-center justify-between rounded-xl px-1">
-        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          <MonitorUp className="size-4" />
-          System proxy
-          <span className="hidden font-mono text-[10px] opacity-70 sm:inline" dir="ltr">
-            {httpAddr}
-          </span>
-        </span>
-        <Switch
-          checked={sysProxy ?? false}
-          disabled={proxyBusy || sysProxy === null}
-          onCheckedChange={(on) => void toggleSysProxy(on)}
-          aria-label="Route system traffic through the tunnel (Windows system proxy)"
-        />
-      </div>
-      <p className="min-h-5 px-1 text-[11px] leading-5 text-muted-foreground">
-        {proxyHint ??
-          (sysProxy === null
-            ? "System proxy control needs the latest backend."
-            : "Flip System proxy any time — even before connecting.")}
-      </p>
-    </div>
+    </AnimatePresence>
   );
 }

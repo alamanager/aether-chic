@@ -63,44 +63,43 @@
    utility app, not a themeable product). */
 :root {
     color-scheme: dark;
-    --background: #0d0d0f;
-    --foreground: #f2f2f2;
-    --card: #1a1a1a;
-    --card-foreground: #f2f2f2;
-    --popover: #1e1e1e;
-    --popover-foreground: #f2f2f2;
-    --primary: #f2711c;
-    /* Near-black, NOT white — white-on-orange measures 2.62:1 and fails
-       WCAG AA outright (verified during design). */
-    --primary-foreground: #0d0d0f;
-    --secondary: #242424;
-    --secondary-foreground: #f2f2f2;
-    --muted: #1e1e1e;
-    --muted-foreground: #a3a3a3;
-    --accent: #2a2a2a;
-    --accent-foreground: #f2f2f2;
-    --destructive: #ef4444;
-    --border: color-mix(in oklch, white 8%, transparent);
-    --input: color-mix(in oklch, white 12%, transparent);
-    --ring: #f2711c;
+    --background: #05060a;
+    --foreground: #eef1ff;
+    --card: #0b0e18;
+    --card-foreground: #eef1ff;
+    --popover: #101524;
+    --popover-foreground: #eef1ff;
+    --primary: #818cf8;
+    /* Near-black on indigo: high contrast both ways (AA). */
+    --primary-foreground: #05060a;
+    --secondary: #161c30;
+    --secondary-foreground: #eef1ff;
+    --muted: #101524;
+    --muted-foreground: #8b93b0;
+    --accent: #1a2140;
+    --accent-foreground: #eef1ff;
+    --destructive: #f87171;
+    --border: color-mix(in oklch, white 9%, transparent);
+    --input: color-mix(in oklch, white 13%, transparent);
+    --ring: #818cf8;
     --radius: 0.625rem;
-    --sidebar: #1a1a1a;
-    --sidebar-foreground: #f2f2f2;
-    --sidebar-primary: #f2711c;
-    --sidebar-primary-foreground: #0d0d0f;
-    --sidebar-accent: #2a2a2a;
-    --sidebar-accent-foreground: #f2f2f2;
-    --sidebar-border: color-mix(in oklch, white 8%, transparent);
-    --sidebar-ring: #f2711c;
+    --sidebar: #0b0e18;
+    --sidebar-foreground: #eef1ff;
+    --sidebar-primary: #818cf8;
+    --sidebar-primary-foreground: #05060a;
+    --sidebar-accent: #1a2140;
+    --sidebar-accent-foreground: #eef1ff;
+    --sidebar-border: color-mix(in oklch, white 9%, transparent);
+    --sidebar-ring: #818cf8;
 
-    --surface-1: #1a1a1a;
-    --surface-2: #1e1e1e;
-    --surface-3: #242424;
-    --surface-4: #2a2a2a;
-    --status-connected: #2dd4bf;
-    --status-connecting: #f2711c;
-    --status-error: #ef4444;
-    --status-idle: #6b7280;
+    --surface-1: #0b0e18;
+    --surface-2: #101524;
+    --surface-3: #161c30;
+    --surface-4: #1e2547;
+    --status-connected: #22c55e;
+    --status-connecting: #a855f7;
+    --status-error: #f87171;
+    --status-idle: #5b6378;
 }
 
 /* Light theme — same brand hue, paper surfaces. Toggled via
@@ -109,41 +108,41 @@
    text on it passes AA (4.5:1). */
 .light {
     color-scheme: light;
-    --background: #e8ebf0;
-    --foreground: #16161a;
-    --card: #f7f9fc;
-    --card-foreground: #16161a;
-    --popover: #f7f9fc;
-    --popover-foreground: #16161a;
-    --primary: #c2410c;
+    --background: #edf0f7;
+    --foreground: #141726;
+    --card: #f8fafd;
+    --card-foreground: #141726;
+    --popover: #f8fafd;
+    --popover-foreground: #141726;
+    --primary: #4f46e5;
     --primary-foreground: #ffffff;
-    --secondary: #e2e6ed;
-    --secondary-foreground: #16161a;
-    --muted: #e2e6ed;
-    --muted-foreground: #5b5b66;
-    --accent: #d9dee7;
-    --accent-foreground: #16161a;
+    --secondary: #e1e6f2;
+    --secondary-foreground: #141726;
+    --muted: #e1e6f2;
+    --muted-foreground: #5a6076;
+    --accent: #d8def0;
+    --accent-foreground: #141726;
     --destructive: #dc2626;
     --border: color-mix(in oklch, black 10%, transparent);
     --input: color-mix(in oklch, black 14%, transparent);
-    --ring: #c2410c;
-    --sidebar: #f7f9fc;
-    --sidebar-foreground: #16161a;
-    --sidebar-primary: #c2410c;
+    --ring: #4f46e5;
+    --sidebar: #f8fafd;
+    --sidebar-foreground: #141726;
+    --sidebar-primary: #4f46e5;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #e2e6ed;
-    --sidebar-accent-foreground: #16161a;
+    --sidebar-accent: #e1e6f2;
+    --sidebar-accent-foreground: #141726;
     --sidebar-border: color-mix(in oklch, black 10%, transparent);
-    --sidebar-ring: #c2410c;
+    --sidebar-ring: #4f46e5;
 
-    --surface-1: #f7f9fc;
-    --surface-2: #e7eaf0;
-    --surface-3: #dde1e9;
-    --surface-4: #d2d7e1;
-    --status-connected: #0d9488;
-    --status-connecting: #ea580c;
+    --surface-1: #f8fafd;
+    --surface-2: #e6eaf4;
+    --surface-3: #dbe0ef;
+    --surface-4: #cfd5e9;
+    --status-connected: #15803d;
+    --status-connecting: #7c3aed;
     --status-error: #dc2626;
-    --status-idle: #8a8a96;
+    --status-idle: #9aa1b5;
 }
 
 @layer base {
@@ -257,7 +256,7 @@
   box-shadow: 0 18px 44px -22px rgb(20 20 30 / 0.28);
 }
 .brand-text {
-  background: linear-gradient(100deg, var(--color-primary), var(--color-status-connected));
+  background: linear-gradient(100deg, #22d3ee, #818cf8 50%, #a855f7);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -266,10 +265,16 @@
   background: linear-gradient(
     90deg,
     transparent,
-    color-mix(in oklch, var(--color-primary) 70%, transparent) 30%,
-    color-mix(in oklch, var(--color-status-connected) 70%, transparent) 70%,
+    color-mix(in oklch, #22d3ee 70%, transparent) 30%,
+    color-mix(in oklch, #a855f7 70%, transparent) 70%,
     transparent
   );
+}
+/* Aurora orb: slow conic rotation for the power ring (transform only). */
+@keyframes aurora-spin { to { transform: rotate(360deg); } }
+.anim-aurora-spin { animation: aurora-spin 14s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-aurora-spin { animation: none; }
 }
 .grid-overlay {
   background-image:

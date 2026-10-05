@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
-import { House, ScrollText, Settings2, ShieldCheck } from "lucide-react";
+import { Activity, ScrollText, SlidersHorizontal, Zap } from "lucide-react";
 import { ConnectButton } from "@/components/ConnectButton";
 import { ConnectionStatusLine } from "@/components/ConnectionStatusLine";
 import { ConnectionInfo } from "@/components/ConnectionInfo";
-import { SpeedCard } from "@/components/SpeedCard";
-import { TransferGraph } from "@/components/TransferGraph";
+import { StatsTab } from "@/components/StatsTab";
 import { SettingsTab } from "@/components/SettingsTab";
 import { LogsTab } from "@/components/LogsTab";
 import { CloseToTrayToggle } from "@/components/CloseToTrayToggle";
@@ -24,33 +23,29 @@ const SCREEN_TRANSITION = {
   transition: { duration: 0.16, ease: [0.22, 1, 0.36, 1] as const },
 };
 
-type Tab = "home" | "settings" | "logs";
+type Tab = "pulse" | "stats" | "tune" | "logs";
 
-const TABS: { id: Tab; label: string; icon: typeof House }[] = [
-  { id: "home", label: "Home", icon: House },
-  { id: "settings", label: "Settings", icon: Settings2 },
+const TABS: { id: Tab; label: string; icon: typeof Zap }[] = [
+  { id: "pulse", label: "Pulse", icon: Zap },
+  { id: "stats", label: "Stats", icon: Activity },
+  { id: "tune", label: "Tune", icon: SlidersHorizontal },
   { id: "logs", label: "Logs", icon: ScrollText },
 ];
 
-function HomeTab() {
+function PulseTab() {
   const attemptId = useConnectionStore((s) => s.attemptId);
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className="flex h-[64px] flex-col items-center justify-center gap-1.5 text-center">
-        <span className="glass flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium text-muted-foreground">
-          <ShieldCheck className="size-3.5 text-status-connected" />
-          Censorship-circumvention tunnel
-        </span>
-        <h1 className="text-xl font-bold tracking-tight">
-          One tap to <span className="brand-text">free internet</span>
+      <div className="flex flex-col items-center gap-1 text-center">
+        <h1 className="text-lg font-extrabold tracking-tight">
+          Ride the <span className="brand-text">aurora</span>
         </h1>
+        <p className="text-[11px] text-muted-foreground">One tap between you and the open net</p>
       </div>
       <ConnectButton />
       <ConnectionStatusLine />
       <AccessCodePrompt key={attemptId} />
       <ConnectionInfo />
-      <SpeedCard />
-      <TransferGraph />
       <div className="w-full max-w-sm">
         <CloseToTrayToggle />
       </div>
@@ -59,44 +54,13 @@ function HomeTab() {
 }
 
 function MainScreen() {
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>("pulse");
   const status = useConnectionStore((s) => s.status);
   const connected = status.state === "Connected";
 
   return (
-    <div className="relative z-10 flex h-full flex-col items-center overflow-y-auto px-6 pt-2 pb-6">
-      <nav
-        aria-label="Sections"
-        className="glass mb-4 flex shrink-0 items-center gap-1 rounded-2xl p-1.5"
-      >
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            aria-pressed={tab === id}
-            className={cn(
-              "flex min-h-11 items-center gap-1.5 rounded-xl px-4 text-xs font-semibold transition-all outline-none focus-visible:ring-2 focus-visible:ring-primary",
-              tab === id
-                ? "bg-primary text-primary-foreground shadow-[0_4px_20px_-4px_var(--color-primary)]"
-                : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
-            )}
-          >
-            <Icon className="size-3.5" />
-            {label}
-            {id === "home" && connected && (
-              <span
-                aria-hidden
-                className={cn(
-                  "size-1.5 rounded-full",
-                  tab === id ? "bg-primary-foreground" : "bg-status-connected",
-                )}
-              />
-            )}
-          </button>
-        ))}
-      </nav>
-      <div className="flex w-full flex-1 flex-col items-center">
+    <div className="relative z-10 flex h-full flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 pt-3 pb-4">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
@@ -106,12 +70,41 @@ function MainScreen() {
             transition={{ duration: 0.12 }}
             className="flex w-full flex-col items-center"
           >
-            {tab === "home" && <HomeTab />}
-            {tab === "settings" && <SettingsTab />}
+            {tab === "pulse" && <PulseTab />}
+            {tab === "stats" && <StatsTab />}
+            {tab === "tune" && <SettingsTab />}
             {tab === "logs" && <LogsTab />}
           </motion.div>
         </AnimatePresence>
       </div>
+      <nav aria-label="Sections" className="flex shrink-0 justify-center px-6 pt-1 pb-4">
+        <div className="glass flex items-center gap-1 rounded-2xl p-1.5">
+          {TABS.map(({ id, label, icon: Icon }) => {
+            const active = tab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                aria-pressed={active}
+                className={cn(
+                  "flex min-h-11 min-w-17 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition-all outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                  active
+                    ? "text-white shadow-[0_4px_24px_-4px_rgb(139_92_246/0.7)]"
+                    : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
+                )}
+                style={active ? { background: "linear-gradient(135deg, #22d3ee, #818cf8 55%, #a855f7)" } : undefined}
+              >
+                <Icon className="size-3.5" />
+                {label}
+                {id === "pulse" && connected && (
+                  <span aria-hidden className={cn("size-1.5 rounded-full", active ? "bg-white" : "bg-status-connected")} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }

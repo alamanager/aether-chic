@@ -26,25 +26,20 @@ function useElapsed(sinceMs: number | null): { formatted: string; totalSeconds: 
   return { formatted: `${h}:${m}:${s}`, totalSeconds: total };
 }
 
-/** Thin progress track under the status text, shown only while Connecting.
- * Determinate (fills toward Aether's own reported scan budget) once that
- * budget is known; an indeterminate shimmer sweep before then, so there's
- * always visible motion rather than a dead bar. */
+/** Honest progress: determinate toward Aether's reported scan budget once
+ * known, indeterminate aurora sweep before then. */
 function ScanProgressBar({ percent }: { percent: number | null }) {
-  // The indeterminate sweep freezes while the window is unfocused — an
-  // infinite loop keeps the compositor at 60fps in the background (see
-  // state/windowFocus.ts), and scanning is exactly when users tab away.
   const focused = useWindowFocused();
   const playState = { animationPlayState: focused ? ("running" as const) : ("paused" as const) };
   return (
-    <div className="h-1.5 w-48 overflow-hidden rounded-full bg-surface-3 ring-1 ring-white/10">
+    <div className="h-1.5 w-52 overflow-hidden rounded-full bg-surface-3 ring-1 ring-white/10">
       {percent == null ? (
         <div className="h-full w-full overflow-hidden rounded-full">
           <div
             className="anim-shimmer h-full w-1/3 rounded-full"
             style={{
               background:
-                "linear-gradient(90deg, transparent, var(--color-status-connecting), transparent)",
+                "linear-gradient(90deg, transparent, #a855f7, #22d3ee, transparent)",
               ...playState,
             }}
           />
@@ -52,10 +47,7 @@ function ScanProgressBar({ percent }: { percent: number | null }) {
       ) : (
         <motion.div
           className="h-full rounded-full"
-          style={{
-            background:
-              "linear-gradient(90deg, var(--color-status-connecting), var(--color-status-connected))",
-          }}
+          style={{ background: "linear-gradient(90deg, #a855f7, #22d3ee)" }}
           animate={{ width: `${percent}%` }}
           transition={{ duration: 0.4, ease: "easeOut" }}
         />
@@ -74,12 +66,8 @@ const DOT: Record<string, string> = {
   Error: "bg-status-error",
 };
 
-/**
- * Fixed-height status rail (72px in every state): dot + primary + one mono
- * secondary line + a reserved progress slot. Nothing here ever changes size,
- * so connecting never shifts the page — the progress slot simply stays empty
- * outside Connecting.
- */
+/** Status rail with real numbers: elapsed attempt timer, scan-budget %,
+ * Tor bootstrap %, reconnect attempt N. Never a bare spinner. */
 export function ConnectionStatusLine() {
   const status = useConnectionStore((s) => s.status);
   const scanBudgetSecs = useConnectionStore((s) => s.scanBudgetSecs);
@@ -88,14 +76,6 @@ export function ConnectionStatusLine() {
   const connectedAt = status.state === "Connected" ? status.connected_at_ms : null;
   const elapsed = useElapsed(connectedAt).formatted;
 
-  // Route discovery can legitimately take up to ~2.5 minutes with nothing
-  // else changing on screen — a running timer (and, once Aether reports its
-  // own scan budget in its log stream, a real percentage) is the difference
-  // between "still working" and "looks hung", tracked from the moment a
-  // fresh attempt starts (Launching) through the whole Connecting wait.
-  // This reads the wall clock (Date.now()) on a specific state transition,
-  // which is an external-system read, not a state mirror — a genuine effect,
-  // not something derivable during render.
   const [attemptStartedAt, setAttemptStartedAt] = useState<number | null>(null);
   /* eslint-disable react-hooks/set-state-in-effect -- capturing Date.now()
    * at the moment of transition; can't be computed during render. */
@@ -108,15 +88,11 @@ export function ConnectionStatusLine() {
   const { formatted: attemptElapsed, totalSeconds: attemptSeconds } = useElapsed(
     isAttempting ? attemptStartedAt : null,
   );
-  // Capped below 100 until the backend actually reports Connected — hitting
-  // 100% here would claim done before the state machine agrees.
   const scanPercent =
     scanBudgetSecs != null
       ? Math.min(99, Math.round((attemptSeconds / scanBudgetSecs) * 100))
       : null;
 
-  // Tor reports bootstrap progress as one number in the store — surface it
-  // so minutes of bootstrapping don't read as hung.
   const isTorAttempt =
     isAttempting && (extra === "tor" || extra === "tor_reverse" || extra === "tor_only");
   const shownTorPct = isTorAttempt ? torPct : null;
@@ -126,32 +102,32 @@ export function ConnectionStatusLine() {
 
   switch (status.state) {
     case "Idle":
-      primary = "Disconnected";
-      secondary = "Click to connect";
+      primary = "Offline";
+      secondary = "Tap the orb to connect";
       break;
     case "Launching":
-      primary = "Starting Aether…";
+      primary = "Waking the engine…";
       secondary = "Answering setup prompts";
       break;
     case "Connecting":
-      primary = "Finding a route…";
+      primary = "Hunting a route…";
       secondary =
         shownTorPct !== null
           ? `Tor bootstrap ${shownTorPct}% · ${attemptElapsed}`
           : scanPercent != null
-            ? `Still searching · ${attemptElapsed} · ${scanPercent}%`
-            : `Still searching · ${attemptElapsed}`;
+            ? `Scanning · ${attemptElapsed} · ${scanPercent}%`
+            : `Scanning · ${attemptElapsed}`;
       break;
     case "Reconnecting":
       primary = "Reconnecting…";
       secondary = `Attempt ${status.attempt} of ${status.max_attempts}`;
       break;
     case "Connected":
-      primary = "Connected";
+      primary = "Tunnel live";
       secondary = elapsed;
       break;
     case "Disconnecting":
-      primary = "Disconnecting…";
+      primary = "Closing…";
       secondary = "";
       break;
     case "Error":
@@ -164,19 +140,19 @@ export function ConnectionStatusLine() {
     <div
       aria-live="polite"
       aria-atomic="true"
-      className="glass flex h-[104px] w-full max-w-sm flex-col items-center justify-center gap-1.5 rounded-2xl px-4 text-center"
+      className="flex w-full max-w-sm flex-col items-center gap-1 text-center"
     >
       <AnimatePresence mode="wait">
         <motion.span
           key={status.state}
           {...TEXT_TRANSITION}
-          className="flex items-center gap-2 text-sm font-semibold text-foreground"
+          className="flex items-center gap-2 text-base font-extrabold tracking-tight text-foreground"
         >
           <span className={cn("size-2 rounded-full", DOT[status.state])} aria-hidden />
           {primary}
         </motion.span>
       </AnimatePresence>
-      <span className="block min-h-5 w-full truncate font-mono text-xs text-muted-foreground">
+      <span className="block min-h-5 w-full truncate font-mono text-[11px] text-muted-foreground">
         {secondary}
       </span>
       <div className="flex h-1.5 items-center justify-center">

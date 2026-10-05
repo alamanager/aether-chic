@@ -28,12 +28,6 @@ function fmtClock(t: number): string {
   return new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-/**
- * Fixed-height transfer history (~4 min ring buffer): download as a solid
- * teal area, upload as a dashed orange line (never hue alone, per the
- * design system). Disconnects render as visible gaps (null samples break
- * both series); the last gap gets a red marker dot. Time runs left→right.
- */
 export function TransferGraph() {
   const samples = useConnectionStore((s) => s.samples);
   const reduced =
@@ -58,28 +52,24 @@ export function TransferGraph() {
   } as const;
 
   return (
-    <div className="glass flex h-[210px] w-full max-w-sm flex-col rounded-2xl p-3">
+    <div className="glass flex h-[230px] w-full max-w-sm flex-col rounded-2xl p-3">
       <div className="mb-1 flex h-6 items-center justify-between px-1">
-        <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
-          Speed history
+        <span className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground uppercase">
+          Flow history
         </span>
         <span className="flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
           <span className="flex items-center gap-1">
-            <span className="inline-block h-0.5 w-3 rounded bg-status-connected" aria-hidden /> down
+            <span className="inline-block h-0.5 w-3 rounded bg-cyan-300" aria-hidden /> down
           </span>
           <span className="flex items-center gap-1">
-            <span
-              className="inline-block h-0 w-3 border-t-2 border-dashed border-status-connecting"
-              aria-hidden
-            />{" "}
-            up
+            <span className="inline-block h-0 w-3 border-t-2 border-dashed border-violet-400" aria-hidden /> up
           </span>
         </span>
       </div>
       <div className="min-h-0 flex-1" role="img" aria-label="Download and upload speed over the last minutes">
         {samples.length < 2 ? (
           <div className="grid h-full place-items-center text-xs text-muted-foreground">
-            No data yet — connect to record speed.
+            No flow yet — connect to record it.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -108,19 +98,16 @@ export function TransferGraph() {
               <Tooltip
                 contentStyle={tipStyle}
                 labelFormatter={(t) => fmtClock(Number(t))}
-                formatter={(v, name) => [
-                  typeof v === "number" ? fmtFull(v) : "—",
-                  name === "down" ? "down" : "up",
-                ]}
+                formatter={(v, name) => [typeof v === "number" ? fmtFull(v) : "—", name === "down" ? "down" : "up"]}
               />
               <Area
                 type="monotone"
                 dataKey="down"
                 name="down"
-                stroke="var(--color-status-connected)"
+                stroke="#67e8f9"
                 strokeWidth={2}
-                fill="var(--color-status-connected)"
-                fillOpacity={0.2}
+                fill="#22d3ee"
+                fillOpacity={0.22}
                 connectNulls={false}
                 dot={false}
                 activeDot={{ r: 3 }}
@@ -130,7 +117,7 @@ export function TransferGraph() {
                 type="monotone"
                 dataKey="up"
                 name="up"
-                stroke="var(--color-status-connecting)"
+                stroke="#a78bfa"
                 strokeWidth={2}
                 strokeDasharray="6 3"
                 fill="none"
@@ -140,13 +127,7 @@ export function TransferGraph() {
                 isAnimationActive={!reduced}
               />
               {gapAt !== null && (
-                <ReferenceDot
-                  x={gapAt}
-                  y={0}
-                  r={4}
-                  fill="var(--color-status-error)"
-                  stroke="none"
-                />
+                <ReferenceDot x={gapAt} y={0} r={4} fill="var(--color-status-error)" stroke="none" />
               )}
             </ComposedChart>
           </ResponsiveContainer>
