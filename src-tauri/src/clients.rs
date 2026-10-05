@@ -152,8 +152,7 @@ pub fn resolve_host(ip: String) -> Option<String> {
     });
     let out = rx
         .recv_timeout(std::time::Duration::from_secs(5))
-        .ok()?
-        .ok()?;
+        .ok()??;
     if !out.status.success() {
         return None;
     }
