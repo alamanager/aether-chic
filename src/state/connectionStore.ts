@@ -1,4 +1,4 @@
-import { create } from "zustand";
+﻿import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -57,9 +57,7 @@ interface ConnectionState {
   setRoutesFile: (routes_file: string) => void;
   setUpstream: (upstream: string) => void;
   setExtraTransport: (extra_transport: ExtraTransport) => void;
-  setTorBridges: (tor_bridges: boolean) => void;
   setPsiphonRegion: (psiphon_region: string) => void;
-  setPsiphonMode: (psiphon_mode: ConnectionProfile["psiphon_mode"]) => void;
   setPeer: (peer: string) => void;
   setWgPeer: (wg_peer: string) => void;
   setGoolPeer: (gool_peer: string) => void;
@@ -85,16 +83,6 @@ interface ConnectionState {
   setNetstackRx: (netstack_rx: string) => void;
   setNetstackTx: (netstack_tx: string) => void;
   setRouteSniff: (route_sniff: boolean) => void;
-  setTorRelays: (tor_relays: string) => void;
-  setTorBridge: (tor_bridge: string) => void;
-  setTorBridgeFile: (tor_bridge_file: string) => void;
-  setTorBind: (tor_bind: string) => void;
-  setPsiphonConfig: (psiphon_config: string) => void;
-  setPsiphonCdnIps: (psiphon_cdn_ips: string) => void;
-  setPsiphonCdnSni: (psiphon_cdn_sni: string) => void;
-  setPsiphonCdnSets: (psiphon_cdn_sets: string) => void;
-  setPsiphonServerEntries: (psiphon_server_entries: string) => void;
-  setPsiphonBind: (psiphon_bind: string) => void;
   clearLogs: () => void;
   retryAfterSidecarError: () => void;
 }
@@ -123,9 +111,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     routes_file: "",
     upstream: "",
     extra_transport: "none",
-    tor_bridges: false,
     psiphon_region: "",
-    psiphon_mode: "auto",
     peer: "",
     wg_peer: "",
     gool_peer: "",
@@ -151,16 +137,6 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     netstack_rx: "",
     netstack_tx: "",
     route_sniff: true,
-    tor_relays: "",
-    tor_bridge: "",
-    tor_bridge_file: "",
-    tor_bind: "",
-    psiphon_config: "",
-    psiphon_cdn_ips: "",
-    psiphon_cdn_sni: "",
-    psiphon_cdn_sets: "",
-    psiphon_server_entries: "",
-    psiphon_bind: "",
   },
   logs: [],
   sidecarError: null,
@@ -204,10 +180,6 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       profile: {
         ...s.profile,
         protocol,
-        // gool-classic is WireGuard-based: the core refuses reverse-mode
-        // transports with it, so selecting it clears Extra transport
-        // instead of letting a dead combo through.
-        ...(protocol === "gool_classic" ? { extra_transport: "none" } : {}),
       },
     })),
 
@@ -279,14 +251,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setExtraTransport: (extra_transport) =>
     set((s) => ({ profile: { ...s.profile, extra_transport } })),
 
-  setTorBridges: (tor_bridges) =>
-    set((s) => ({ profile: { ...s.profile, tor_bridges } })),
-
   setPsiphonRegion: (psiphon_region) =>
     set((s) => ({ profile: { ...s.profile, psiphon_region } })),
-
-  setPsiphonMode: (psiphon_mode) =>
-    set((s) => ({ profile: { ...s.profile, psiphon_mode } })),
 
   setPeer: (peer) => set((s) => ({ profile: { ...s.profile, peer } })),
   setWgPeer: (wg_peer) => set((s) => ({ profile: { ...s.profile, wg_peer } })),
@@ -315,22 +281,6 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setNetstackRx: (netstack_rx) => set((s) => ({ profile: { ...s.profile, netstack_rx } })),
   setNetstackTx: (netstack_tx) => set((s) => ({ profile: { ...s.profile, netstack_tx } })),
   setRouteSniff: (route_sniff) => set((s) => ({ profile: { ...s.profile, route_sniff } })),
-  setTorRelays: (tor_relays) => set((s) => ({ profile: { ...s.profile, tor_relays } })),
-  setTorBridge: (tor_bridge) => set((s) => ({ profile: { ...s.profile, tor_bridge } })),
-  setTorBridgeFile: (tor_bridge_file) =>
-    set((s) => ({ profile: { ...s.profile, tor_bridge_file } })),
-  setTorBind: (tor_bind) => set((s) => ({ profile: { ...s.profile, tor_bind } })),
-  setPsiphonConfig: (psiphon_config) =>
-    set((s) => ({ profile: { ...s.profile, psiphon_config } })),
-  setPsiphonCdnIps: (psiphon_cdn_ips) =>
-    set((s) => ({ profile: { ...s.profile, psiphon_cdn_ips } })),
-  setPsiphonCdnSni: (psiphon_cdn_sni) =>
-    set((s) => ({ profile: { ...s.profile, psiphon_cdn_sni } })),
-  setPsiphonCdnSets: (psiphon_cdn_sets) =>
-    set((s) => ({ profile: { ...s.profile, psiphon_cdn_sets } })),
-  setPsiphonServerEntries: (psiphon_server_entries) =>
-    set((s) => ({ profile: { ...s.profile, psiphon_server_entries } })),
-  setPsiphonBind: (psiphon_bind) => set((s) => ({ profile: { ...s.profile, psiphon_bind } })),
 
   clearLogs: () => set({ logs: [] }),
 

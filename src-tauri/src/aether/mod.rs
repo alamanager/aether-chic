@@ -112,18 +112,15 @@ pub fn start_connect(
         // (covers a manually-started Aether or a missing/corrupted pid file),
         // checked under the same lock as the state check above so a rapid
         // double-click can't race two connect() calls past this guard before
-        // the first transitions to Launching.
-        let socks = status::parse_bind_address(&profile.bind_address);
-        if status::port_is_live(&socks) {
-            return Err(AetherError::PortInUse(socks.port()));
-        }
-        // The core also binds its HTTP proxy (SOCKS port + 1, always passed
-        // since the v2.1.0 pin). A stale occupant there would leave SOCKS
-        // working while the usability probe — and the system proxy — talk
-        // to a dead port, i.e. "connected but nothing works".
-        let http = profiles::http_proxy_socket_for(&profile);
-        if status::port_is_live(&http) {
-            return Err(AetherError::PortInUse(http.port()));
+        // the first transitions to Launching. Every listener must be free:
+        // a stale occupant on any of them would leave the rest working
+        // while that one talks to a dead port.
+        if let Some(busy) = profile
+            .listen_addrs()
+            .iter()
+            .find(|a| status::port_is_live(a))
+        {
+            return Err(AetherError::PortInUse(busy.port()));
         }
         mgr.state = ConnectionState::Launching;
         // A fresh user-initiated connect always gets a full retry budget,
@@ -274,8 +271,8 @@ fn monitor_connect(
     data_dir: PathBuf,
     profile: ConnectionProfile,
 ) {
-    let deadline = Instant::now() + status::connect_timeout(&profile.scan_mode);
-    let socks = status::parse_bind_address(&profile.bind_address);
+    let deadline = Instant::now() + status::profile_connect_timeout(&profile);
+    let ready = profile.ready_addrs();
     let mut announced_connecting = false;
 
     loop {
@@ -304,7 +301,7 @@ fn monitor_connect(
             let done = mgr
                 .session
                 .as_ref()
-                .map(|s| s.prompts_done())
+                .map(|s| s.prompts_done() || s.engine_started())
                 .unwrap_or(false);
             if done {
                 mgr.state = ConnectionState::Connecting;
@@ -316,77 +313,32 @@ fn monitor_connect(
             }
         }
 
-        if status::port_is_live(&socks) {
-            // Tor/Psiphon modes bind the local ports long before the exit is
-            // usable (observed: Tor stuck at 15% fetching consensus, Psiphon
-            // ~6s behind). Confirm real traffic flows before calling it
-            // Connected — the probe sleeps, so the lock must go first.
-            let http = profiles::http_proxy_socket_for(&profile);
-            let needs_probe = profile.extra_transport != ExtraTransport::None;
-            drop(mgr);
-            if needs_probe
-                && !status::wait_until_usable(
-                    &http,
-                    Instant::now() + status::EXTRA_TRANSPORT_TIMEOUT,
-                )
-            {
-                let mut mgr = manager.lock().unwrap();
-                if mgr.user_requested_stop {
-                    return;
-                }
-                if let Some(session) = mgr.session.as_mut() {
-                    session.kill();
-                }
-                mgr.session = None;
-                drop(mgr);
-                handle_unexpected_failure(
-                    app,
-                    manager,
-                    binary,
-                    data_dir,
-                    profile,
-                    "Timed out waiting for Tor/Psiphon to become usable".into(),
-                    "connecting",
-                );
-                return;
-            }
-            let mut mgr = manager.lock().unwrap();
-            if mgr.user_requested_stop {
-                return;
-            }
-            if let Some(exit) = mgr.session.as_mut().and_then(|s| s.try_wait()) {
-                mgr.session = None;
-                drop(mgr);
-                handle_unexpected_failure(
-                    app,
-                    manager,
-                    binary,
-                    data_dir,
-                    profile,
-                    format!("Aether exited before connecting ({exit})"),
-                    "connecting",
-                );
-                return;
-            }
+        // Tor/Psiphon open their port before they can carry anything, so
+        // those modes also wait for the core to say it is ready (parsed
+        // from its log stream). Warp needs no marker: an answering port
+        // IS a working tunnel there.
+        let overlay_ok = profile.extra_transport == ExtraTransport::None
+            || mgr
+                .session
+                .as_ref()
+                .is_some_and(|s| s.overlay_ready());
+        if overlay_ok && ready.iter().all(status::port_is_live) {
             let new_state = ConnectionState::Connected {
-                // Report the connectable address: a 0.0.0.0 bind is real for
-                // the core but useless to clients (see status::client_addr).
-                socks_addr: status::client_addr(&socks).to_string(),
+                // In chain modes this is the Tor/Psiphon exit (--bind keeps
+                // the plain WARP exit); otherwise the connectable bind.
+                socks_addr: profile.primary_addr(),
                 connected_at_ms: now_millis(),
             };
             mgr.state = new_state.clone();
             // Proven working — a future drop earns a fresh full retry budget
             // rather than inheriting whatever it took to get here.
             mgr.retry_count = 0;
-            // The core serves its native HTTP proxy on SOCKS port + 1 (see
-            // profiles::http_proxy_addr) — the frontend computes the same
-            // address locally, so nothing needs remembering here.
-            let http_str = http.to_string();
+            let http_str = profile.frontend_http_addr().to_string();
             drop(mgr);
             let _ = app.emit(
                 LOG_EVENT,
                 &LogEvent {
-                    line: format!("[gui] HTTP proxy on {http_str} (SOCKS {socks})"),
+                    line: format!("[gui] HTTP proxy on {http_str} (primary {})", profile.primary_addr()),
                     timestamp: now_millis(),
                 },
             );
@@ -431,7 +383,7 @@ fn monitor_connected(
     data_dir: PathBuf,
     profile: ConnectionProfile,
 ) {
-    let http = profiles::http_proxy_socket_for(&profile);
+    let http = profile.frontend_http_addr();
     let mut ticks: u32 = 0;
     let mut dead: u32 = 0;
     loop {
@@ -572,8 +524,6 @@ pub fn submit_access_code(
 /// blocks briefly rather than spawning a thread, and skips emitting events
 /// nobody is left to receive.
 pub fn shutdown_blocking(manager: &Arc<Mutex<AetherManager>>, data_dir: &Path) {
-    crate::psiphon_direct::stop_silent();
-
     let mut mgr = manager.lock().unwrap();
     if let Some(session) = mgr.session.as_mut() {
         session.send_ctrl_c();

@@ -14,6 +14,8 @@ pub struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     prompts_done: Arc<AtomicBool>,
+    overlay_ready: Arc<AtomicBool>,
+    engine_started: Arc<AtomicBool>,
     // Keeps the pty master (and thus the slave/child's controlling tty) alive
     // for the life of the session; never read from directly after spawn.
     _master: Box<dyn MasterPty + Send>,
@@ -26,6 +28,20 @@ impl PtySession {
 
     pub fn prompts_done(&self) -> bool {
         self.prompts_done.load(Ordering::Relaxed)
+    }
+
+    /// Tor/Psiphon open their port before they can carry anything; the core
+    /// says so on stdout (`[+] tor is ready; …` / `[+] psiphon is ready; …
+    /// — the exact lines the reference implementation keys on).
+    pub fn overlay_ready(&self) -> bool {
+        self.overlay_ready.load(Ordering::Relaxed)
+    }
+
+    /// First core banner line seen ("Aether v…") — the engine is alive and
+    /// past setup, a better Launching→Connecting trigger than prompt
+    /// completion (flags bypass prompts entirely).
+    pub fn engine_started(&self) -> bool {
+        self.engine_started.load(Ordering::Relaxed)
     }
 
     pub fn try_wait(&mut self) -> Option<portable_pty::ExitStatus> {
@@ -181,6 +197,10 @@ pub fn spawn(
     // prompt ever arrives to complete the set.
     let prompts_done = Arc::new(AtomicBool::new(true));
     let prompts_done_for_thread = Arc::clone(&prompts_done);
+    let overlay_ready = Arc::new(AtomicBool::new(false));
+    let overlay_ready_for_thread = Arc::clone(&overlay_ready);
+    let engine_started = Arc::new(AtomicBool::new(false));
+    let engine_started_for_thread = Arc::clone(&engine_started);
 
     std::thread::spawn(move || {
         read_loop(
@@ -189,6 +209,8 @@ pub fn spawn(
             profile,
             log_tx,
             prompts_done_for_thread,
+            overlay_ready_for_thread,
+            engine_started_for_thread,
         );
     });
 
@@ -196,6 +218,8 @@ pub fn spawn(
         child,
         writer,
         prompts_done,
+        overlay_ready,
+        engine_started,
         _master: pair.master,
     })
 }
@@ -206,6 +230,8 @@ fn read_loop(
     profile: ConnectionProfile,
     log_tx: Sender<LogEvent>,
     prompts_done: Arc<AtomicBool>,
+    overlay_ready: Arc<AtomicBool>,
+    engine_started: Arc<AtomicBool>,
 ) {
     let mut answered: HashSet<&'static str> = HashSet::new();
     let mut current_section: Option<&'static str> = None;
@@ -223,11 +249,18 @@ fn read_loop(
 
         // Emit every complete line, tracking which known prompt "section"
         // we're currently in (the last recognized header line wins — plain
-        // log lines in between don't reset it).
+        // log lines in between don't reset it). Also watch for the engine
+        // banner and the Tor/Psiphon readiness markers.
         for raw_line in drain_lines(&mut line_buf) {
             let line = strip_ansi(&raw_line);
             if line.is_empty() {
                 continue;
+            }
+            if line.contains("Aether v") {
+                engine_started.store(true, Ordering::Relaxed);
+            }
+            if is_overlay_ready_line(&line) {
+                overlay_ready.store(true, Ordering::Relaxed);
             }
             for rule in PROMPT_TABLE {
                 if (rule.header_matches)(&line) {
@@ -294,6 +327,14 @@ fn read_loop(
 /// `strip_ansi` rescans the whole tail on every read, so an unbounded tail
 /// (e.g. output that never emits a terminator) would be O(n²) CPU.
 const MAX_PARTIAL: usize = 16 * 1024;
+
+/// Tor/Psiphon open their port before they can carry anything, so those
+/// modes also wait for the core to say it is ready. Matched loosely on
+/// purpose (timestamps/levels vary); the two known shapes are
+/// `[+] tor is ready; …` and `[+] psiphon is ready; …`.
+fn is_overlay_ready_line(line: &str) -> bool {
+    line.contains("tor is ready;") || line.contains("psiphon is ready;")
+}
 
 /// Drains and returns every terminated line in `buf`, leaving the
 /// unterminated tail in place. Terminal semantics, not plain `\n`-splitting:

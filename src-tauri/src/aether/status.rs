@@ -1,7 +1,7 @@
 use super::profiles::ScanMode;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub const DEFAULT_SOCKS_ADDR: &str = "127.0.0.1:1819";
 
@@ -53,12 +53,12 @@ pub fn connect_timeout(scan_mode: &ScanMode) -> Duration {
     })
 }
 
-/// Backstop for the extra-transport usability probe below. Tor/Psiphon bind
-/// the local ports minutes before the exit is usable (Tor: 75s plain attempt
-/// + bridge fetch + directory download — see AETHER_TOR_DIRECT_SECS,
-/// AETHER_TOR_STALL_SECS, AETHER_TOR_BRIDGE_SECS), so this is far longer
-/// than any scan-mode timeout.
-pub const EXTRA_TRANSPORT_TIMEOUT: Duration = Duration::from_secs(600);
+/// Full connect budget for a profile: the scan-mode backstop plus extra
+/// waiting for Tor/Psiphon overlays (Tor may try plainly then walk bridges;
+/// Psiphon waits up to 180s to tunnel).
+pub fn profile_connect_timeout(p: &super::profiles::ConnectionProfile) -> Duration {
+    connect_timeout(&p.scan_mode) + Duration::from_secs(p.extra_wait_secs())
+}
 
 /// Plain-HTTP targets for the usability probe, in order. api.ipify.org is
 /// first (tiny JSON body), www.example.com is the fallback: shared exits
@@ -131,20 +131,6 @@ pub fn traffic_flows(http: &SocketAddr) -> bool {
     probe_once(http)
 }
 
-/// Blocks until the tunnel carries traffic or `deadline` passes. Only used
-/// for Tor/Psiphon modes, where an open SOCKS port predates a usable exit
-/// by seconds (Psiphon) to many minutes (Tor bootstrap on filtered nets).
-pub fn wait_until_usable(http: &SocketAddr, deadline: Instant) -> bool {
-    loop {
-        if probe_once(http) {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(Duration::from_secs(2));
-    }
-}
 /// How long to wait after sending Ctrl-C before force-killing. Manually
 /// testing shutdown against the real binary showed it does NOT exit quickly
 /// on SIGINT (still alive 10+ seconds later) — but since v1 never elevates

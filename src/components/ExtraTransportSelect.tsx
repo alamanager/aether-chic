@@ -16,7 +16,6 @@ const LABELS: Record<ExtraTransport, string> = {
   psiphon: "Psiphon inside the tunnel",
   psiphon_reverse: "Tunnel through Psiphon",
   psiphon_only: "Psiphon only",
-  psiphon_direct: "Psiphon direct (console client)",
 };
 
 /**
@@ -27,20 +26,16 @@ const LABELS: Record<ExtraTransport, string> = {
  */
 export function ExtraTransportSelect() {
   const status = useConnectionStore((s) => s.status);
-  const protocol = useConnectionStore((s) => s.profile.protocol);
   const extra = useConnectionStore((s) => s.profile.extra_transport);
   const setExtraTransport = useConnectionStore((s) => s.setExtraTransport);
 
   const locked = status.state !== "Idle" && status.state !== "Error";
-  // gool-classic is WireGuard-based: reverse-mode transports are refused
-  // with it, so the whole section locks (selecting it already cleared it).
-  const disabled = locked || protocol === "gool_classic";
 
   return (
     <Select
       value={extra}
       onValueChange={(v) => setExtraTransport(v as ExtraTransport)}
-      disabled={disabled}
+      disabled={locked}
     >
       <SelectTrigger
         size="sm"

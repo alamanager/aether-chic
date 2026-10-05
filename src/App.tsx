@@ -3,7 +3,6 @@ import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { House, ScrollText, Settings2, ShieldCheck } from "lucide-react";
 import { ConnectButton } from "@/components/ConnectButton";
 import { ConnectionStatusLine } from "@/components/ConnectionStatusLine";
-import { TorStallGuard } from "@/components/TorStallGuard";
 import { ConnectionInfo } from "@/components/ConnectionInfo";
 import { SpeedCard } from "@/components/SpeedCard";
 import { TransferGraph } from "@/components/TransferGraph";
@@ -48,7 +47,6 @@ function HomeTab() {
       </div>
       <ConnectButton />
       <ConnectionStatusLine />
-      <TorStallGuard key={attemptId} />
       <AccessCodePrompt key={attemptId} />
       <ConnectionInfo />
       <SpeedCard />

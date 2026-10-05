@@ -10,28 +10,11 @@ pub fn connect(
     state: State<AppState>,
     profile_override: Option<ConnectionProfile>,
 ) -> Result<(), AetherError> {
-    // Load once so both branches decide on the same profile.
-    let profile = profile_override.unwrap_or_else(|| aether::profiles::load(&app));
-    if profile.extra_transport.is_direct() {
-        // Direct console-client mode bypasses the core entirely.
-        let busy = !matches!(
-            state.manager.lock().unwrap().status(),
-            ConnectionState::Idle | ConnectionState::Error { .. }
-        );
-        if busy {
-            return Err(AetherError::AlreadyRunning);
-        }
-        return crate::psiphon_direct::start(app, profile);
-    }
-    if crate::psiphon_direct::is_active() {
-        return Err(AetherError::AlreadyRunning);
-    }
-    aether::start_connect(app, state.manager.clone(), Some(profile))
+    aether::start_connect(app, state.manager.clone(), profile_override)
 }
 
 #[tauri::command]
 pub fn disconnect(app: AppHandle, state: State<AppState>) -> Result<(), AetherError> {
-    crate::psiphon_direct::stop(&app);
     aether::request_disconnect(&app, &state.manager)
 }
 
@@ -42,9 +25,6 @@ pub fn submit_access_code(state: State<AppState>, code: String) -> Result<(), Ae
 
 #[tauri::command]
 pub fn get_status(state: State<AppState>) -> ConnectionState {
-    if crate::psiphon_direct::is_active() {
-        return crate::psiphon_direct::status();
-    }
     state.manager.lock().unwrap().status()
 }
 

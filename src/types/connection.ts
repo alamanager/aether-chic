@@ -22,8 +22,7 @@ export type ExtraTransport =
   | "tor_only"
   | "psiphon"
   | "psiphon_reverse"
-  | "psiphon_only"
-  | "psiphon_direct";
+  | "psiphon_only";
 
 export interface ConnectionProfile {
   protocol: Protocol;
@@ -59,12 +58,8 @@ export interface ConnectionProfile {
   upstream: string;
   /** Aether ≥2.0/2.1: built-in Tor / Psiphon transports (needs core's pt/). */
   extra_transport: ExtraTransport;
-  /** Skip Tor's direct attempt, go straight to bridges. */
-  tor_bridges: boolean;
   /** Psiphon egress region (ISO alpha-2, "" = automatic). */
   psiphon_region: string;
-  /** Psiphon shape: automatic / fronted-meek-only / direct. */
-  psiphon_mode: "auto" | "cdn" | "direct";
   /** v2.2 forced peers (empty = scan). */
   peer: string;
   wg_peer: string;
@@ -96,18 +91,6 @@ export interface ConnectionProfile {
   netstack_rx: string;
   netstack_tx: string;
   route_sniff: boolean;
-  /** v2.2 Tor extras. */
-  tor_relays: string;
-  tor_bridge: string;
-  tor_bridge_file: string;
-  tor_bind: string;
-  /** v2.2 Psiphon extras. */
-  psiphon_config: string;
-  psiphon_cdn_ips: string;
-  psiphon_cdn_sni: string;
-  psiphon_cdn_sets: string;
-  psiphon_server_entries: string;
-  psiphon_bind: string;
   route_direct: string;
   routes_file: string;
 }
