@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, Globe, MonitorUp, RefreshCw, Server } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { ClientsCard } from "@/components/ClientsCard";
 import { useConnectionStore } from "@/state/connectionStore";
 import { cn } from "@/lib/utils";
 
@@ -314,6 +315,7 @@ export function ConnectionInfo() {
             />
           </div>
           {proxyHint && <p className="px-1 text-[11px] leading-5 text-muted-foreground">{proxyHint}</p>}
+          <ClientsCard />
         </motion.div>
       )}
     </AnimatePresence>
