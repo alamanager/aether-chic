@@ -15,6 +15,14 @@ use state::AppState;
 use tauri::{Manager, WindowEvent};
 
 fn main() {
+    // Elevated-takeover handshake (see request_admin): the relaunch passes
+    // this flag so the parent knows the elevated copy booted. Touch the
+    // file and boot normally — no auto-connect, so no port fight.
+    for arg in std::env::args().skip(1) {
+        if let Some(path) = arg.strip_prefix("--elevated-ready=") {
+            let _ = std::fs::write(path, "ready");
+        }
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::default())
@@ -45,6 +53,8 @@ fn main() {
             commands::set_system_proxy,
             clients::proxy_clients,
             clients::resolve_host,
+            clients::is_elevated,
+            clients::request_admin,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
