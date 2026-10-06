@@ -87,6 +87,61 @@ function TorBridgesRow() {
   );
 }
 
+/**
+ * ECH in one tap: Off / Automatic / Custom. Automatic fills the recommended
+ * setup (key lookup over DoH, core defaults) — Custom reveals the raw
+ * fields for pasting your own key or resolver. Switching away from Custom
+ * clears the raw fields so a stale key can never linger silently.
+ */
+function EchPresetRow() {
+  const status = connectionStore((s) => s.status);
+  const ech = connectionStore((s) => s.profile.ech);
+  const echDns = connectionStore((s) => s.profile.ech_dns);
+  const echDomain = connectionStore((s) => s.profile.ech_domain);
+  const api = connectionStore.getState();
+
+  const locked = status.state !== "Idle" && status.state !== "Error";
+  const preset = ech.trim() === "" ? "off" : ech.trim() === "auto" && echDns.trim() === "" && echDomain.trim() === "" ? "auto" : "custom";
+
+  const apply = (v: string) => {
+    if (v === "off") {
+      api.setEch("");
+      api.setEchDns("");
+      api.setEchDomain("");
+    } else if (v === "auto") {
+      api.setEch("auto");
+      api.setEchDns("");
+      api.setEchDomain("");
+    } else {
+      if (ech.trim() === "") api.setEch("auto");
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <SelectOpt
+        value={preset}
+        onChange={apply}
+        disabled={locked}
+        label="ECH preset"
+        options={[["off", "Off"], ["auto", "Automatic (recommended)"], ["custom", "Custom"]]}
+      />
+      {preset === "auto" && (
+        <p className="px-1 text-[11px] leading-5 text-muted-foreground">
+          Key looked up securely on every connect — nothing to paste, nothing to maintain.
+        </p>
+      )}
+      {preset === "custom" && (
+        <div className="flex flex-col gap-1.5">
+          <TextOpt value={ech} onChange={api.setEch} disabled={locked} placeholder="auto or base64 key" label="ECH mode" mono />
+          <TextOpt value={echDns} onChange={api.setEchDns} disabled={locked} placeholder="Key resolver (default udp://1.1.1.1)" label="ECH DNS resolver" mono />
+          <TextOpt value={echDomain} onChange={api.setEchDomain} disabled={locked} placeholder="Key domain (default cloudflare-ech.com)" label="ECH domain" mono />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuickReconnectRow() {
   const status = connectionStore((s) => s.status);
   const quickReconnect = connectionStore((s) => s.profile.quick_reconnect);
@@ -254,12 +309,8 @@ export function SettingsTab() {
 
       <Section icon={<Fingerprint className="size-4" />} title="ECH & TLS" stamp="handshake disguise">
         <FieldRow label="Encrypted Client Hello"
-          tooltip="Enable ECH on MASQUE handshakes and WARP API calls: auto looks the key up over DoH, or paste a base64 key. Empty = off.">
-          <div className="flex flex-col gap-1.5">
-            <TextOpt value={p.ech} onChange={api.setEch} disabled={locked} placeholder="auto or base64 key (optional)" label="ECH mode" mono />
-            <TextOpt value={p.ech_dns} onChange={api.setEchDns} disabled={locked} placeholder="Key resolver (default udp://1.1.1.1)" label="ECH DNS resolver" mono />
-            <TextOpt value={p.ech_domain} onChange={api.setEchDomain} disabled={locked} placeholder="Key domain (default cloudflare-ech.com)" label="ECH domain" mono />
-          </div>
+          tooltip="Hides the server name inside your handshake so filters can't read or block it. Automatic = look the key up securely, no pasting. Needs a MASQUE protocol; some hostile networks drop ECH handshakes — if connects fail with it on, try Off.">
+          <EchPresetRow />
         </FieldRow>
         <FieldRow label="TLS fingerprint" tooltip="TLS 1.2 cipher suites and groups (Chrome defaults when empty). GREASE values are included like Chrome unless disabled.">
           <div className="flex flex-col gap-1.5">
