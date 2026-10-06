@@ -60,6 +60,7 @@ fn is_loopback(ip: &str) -> bool {
 
 /// One observed connection. `up`/`down` are its cumulative ESTATS bytes
 /// (elevated only); without them each sample just counts 1 connection.
+#[derive(Debug, Clone)]
 struct ConnSample {
     ip: String,
     conn_id: String,
@@ -380,8 +381,8 @@ const ESTATS_DATA: u32 = 1;
 #[cfg(windows)]
 const NO_ERROR: u32 = 0;
 
-/// Network-order DWORD low half → host port.
-#[cfg(windows)]
+/// Network-order DWORD low half → host port. Pure math, no platform
+/// dependency, so it stays ungated and tested everywhere.
 fn port_host(raw: u32) -> u16 {
     u16::from_be((raw & 0xFFFF) as u16)
 }
