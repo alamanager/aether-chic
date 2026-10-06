@@ -39,6 +39,19 @@ export function fmtBytes(b: number): string {
   return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+export function fmtDur(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s % 60}s`;
+  return `${s}s`;
+}
+
+export function fmtClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
 interface Session {
   firstSeen: number;
   totalMs: number;
