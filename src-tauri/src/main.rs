@@ -7,6 +7,7 @@ mod commands;
 mod error;
 mod events;
 mod focus;
+mod matrix;
 mod state;
 mod sysproxy;
 mod tray;
@@ -56,6 +57,8 @@ fn main() {
             clients::clients_diag,
             clients::is_elevated,
             clients::request_admin,
+            matrix::matrix_start,
+            matrix::matrix_cancel,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

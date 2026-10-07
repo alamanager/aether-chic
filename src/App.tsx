@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
-import { Activity, ScrollText, SlidersHorizontal, Zap } from "lucide-react";
+import { Activity, FlaskConical, ScrollText, SlidersHorizontal, Zap } from "lucide-react";
 import { ConnectButton } from "@/components/ConnectButton";
 import { ConnectionStatusLine } from "@/components/ConnectionStatusLine";
 import { ConnectionInfo } from "@/components/ConnectionInfo";
 import { StatsTab } from "@/components/StatsTab";
 import { SettingsTab } from "@/components/SettingsTab";
 import { LogsTab } from "@/components/LogsTab";
+import { MatrixTab } from "@/components/MatrixTab";
 import { CloseToTrayToggle } from "@/components/CloseToTrayToggle";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { SidecarErrorScreen } from "@/components/SidecarErrorScreen";
@@ -23,13 +24,14 @@ const SCREEN_TRANSITION = {
   transition: { duration: 0.16, ease: [0.22, 1, 0.36, 1] as const },
 };
 
-type Tab = "pulse" | "stats" | "tune" | "logs";
+type Tab = "pulse" | "stats" | "tune" | "logs" | "lab";
 
 const TABS: { id: Tab; label: string; icon: typeof Zap }[] = [
   { id: "pulse", label: "Pulse", icon: Zap },
   { id: "stats", label: "Stats", icon: Activity },
   { id: "tune", label: "Tune", icon: SlidersHorizontal },
   { id: "logs", label: "Logs", icon: ScrollText },
+  { id: "lab", label: "Lab", icon: FlaskConical },
 ];
 
 function PulseTab() {
@@ -74,6 +76,7 @@ function MainScreen() {
             {tab === "stats" && <StatsTab />}
             {tab === "tune" && <SettingsTab />}
             {tab === "logs" && <LogsTab />}
+            {tab === "lab" && <MatrixTab />}
           </motion.div>
         </AnimatePresence>
       </div>

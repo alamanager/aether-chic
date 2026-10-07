@@ -2,6 +2,7 @@ use serde::Serialize;
 
 pub const STATUS_EVENT: &str = "aether://status";
 pub const LOG_EVENT: &str = "aether://log";
+pub const MATRIX_EVENT: &str = "aether://matrix";
 
 #[derive(Serialize, Clone, Debug)]
 pub struct LogEvent {
