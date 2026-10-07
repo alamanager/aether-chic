@@ -212,6 +212,7 @@ pub fn matrix_start(app: AppHandle, state: State<AppState>) -> Result<(), Aether
             })
             .collect();
         let remaining = remaining.clone();
+        let data_root = data_root.clone();
         std::thread::spawn(move || {
             let lane_manager = Arc::new(Mutex::new(crate::aether::AetherManager::new()));
             let lane_dir = data_root.join(format!("matrix-slot-{lane}"));
