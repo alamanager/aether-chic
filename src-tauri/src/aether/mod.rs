@@ -90,6 +90,19 @@ pub fn start_connect(
     manager: Arc<Mutex<AetherManager>>,
     profile_override: Option<ConnectionProfile>,
 ) -> Result<(), AetherError> {
+    let data_dir = app_data_dir(&app);
+    start_connect_in(app, manager, data_dir, profile_override)
+}
+
+/// Same as start_connect but with a caller-chosen data dir (identity +
+/// pid file). The matrix lab runs parallel lanes isolated this way — same
+/// binary, separate identities, separate ports.
+pub fn start_connect_in(
+    app: AppHandle,
+    manager: Arc<Mutex<AetherManager>>,
+    data_dir: PathBuf,
+    profile_override: Option<ConnectionProfile>,
+) -> Result<(), AetherError> {
     // Resolve everything fallible that doesn't touch AetherManager's state
     // first, so that once we transition to Launching below, the only
     // remaining failure mode is pty::spawn itself — which is handled
@@ -97,7 +110,6 @@ pub fn start_connect(
     // state machine stuck in Launching with no process behind it.
     let profile = profile_override.unwrap_or_else(|| profiles::load(&app));
     let binary = resolve_binary(&app)?;
-    let data_dir = app_data_dir(&app);
     std::fs::create_dir_all(&data_dir).map_err(|e| AetherError::Internal(e.to_string()))?;
 
     {

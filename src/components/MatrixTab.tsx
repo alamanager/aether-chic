@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FlaskConical, Play, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useConnectionStore } from "@/state/connectionStore";
+import { useConnectionStore, setMatrixActive } from "@/state/connectionStore";
 
 interface MatrixEvent {
   key: string;
@@ -46,12 +46,16 @@ export function MatrixTab() {
       const ev = e.payload;
       if (ev.phase === "finished") {
         setRunning(false);
+        setMatrixActive(false);
         return;
       }
       if (ev.phase === "running") setRunning(true);
       setResults((prev) => ({ ...prev, [ev.key]: ev }));
     });
     return () => {
+      // Leaving Lab aborts the run and unfreezes the main UI.
+      void invoke("matrix_cancel").catch(() => {});
+      setMatrixActive(false);
       void unlisten.then((u) => u());
     };
   }, []);
@@ -60,14 +64,17 @@ export function MatrixTab() {
     setHint(null);
     setResults({});
     try {
+      setMatrixActive(true);
       await invoke("matrix_start");
       setRunning(true);
     } catch (e) {
+      setMatrixActive(false);
       setHint(`Could not start: ${String(e)}. Disconnect first, then test.`);
     }
   };
 
   const cancel = async () => {
+    setMatrixActive(false);
     try {
       await invoke("matrix_cancel");
     } catch {
@@ -99,8 +106,9 @@ export function MatrixTab() {
           )}
         </div>
         <p className="px-1 text-[11px] leading-5 text-muted-foreground">
-          Tries all 30 combos for real and times a fetch through each tunnel.
-          Tor rows take minutes (bootstrap). Cancel anytime — finished rows stay.
+          Tries all 30 combos for real on 3 parallel lanes and times a fetch
+          through each tunnel. Tor rows take minutes (bootstrap). Cancel
+          anytime — finished rows stay. Leaving this tab aborts the run.
         </p>
         <div className="flex gap-2">
           <button

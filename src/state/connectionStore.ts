@@ -361,6 +361,14 @@ function toBytes(value: number, unit: string): number {
   }
 }
 
+/** While a matrix run is active, lane sessions emit global status/log
+ * events that must NOT drive the main UI (status line, sysproxy
+ * auto-apply, logs). Set by the Lab tab; leaving Lab aborts the run. */
+let matrixActive = false;
+export function setMatrixActive(on: boolean) {
+  matrixActive = on;
+}
+
 /** Call once from App's top-level effect; returns a cleanup function. */
 export async function initConnectionListeners(): Promise<() => void> {
   // Log lines arrive fast during route scanning; flushing to the store per
@@ -411,6 +419,7 @@ export async function initConnectionListeners(): Promise<() => void> {
 
   const [unlistenStatus, unlistenLog] = await Promise.all([
     listen<ConnectionStatus>("aether://status", (e) => {
+      if (matrixActive) return;
       useConnectionStore.setState((s) => ({
         status: e.payload,
         // Fresh attempt — last attempt's budget/percent/counters reset.
@@ -424,6 +433,7 @@ export async function initConnectionListeners(): Promise<() => void> {
       }));
     }),
     listen<LogLine>("aether://log", (e) => {
+      if (matrixActive) return;
       pendingLogs.push(e.payload);
       flushTimer ??= setTimeout(flushLogs, 100);
     }),

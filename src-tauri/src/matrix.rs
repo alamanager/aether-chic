@@ -1,18 +1,25 @@
 //! Connection matrix lab: try every meaningful protocol × transport
-//! combo for real (sequential connects with per-type budgets), measure
-//! through-tunnel latency on each success, report per-combo results.
+//! combo for real, three lanes in parallel (like v2rayNG/sing-box test
+//! with capped concurrency — sequential full connects would take hours).
 //!
 //! The matrix is curated, not cartesian: reverses are MASQUE-only by
 //! construction (covered by the masque rows), scan/noize/ip come from the
 //! current profile so transports compare fairly. Fresh scan every combo
-//! (quick_reconnect off) so results reflect reachability, not cache.
+//! (quick_reconnect off, ZeroTrust team stripped) so results reflect
+//! reachability, not cache or identity.
+//!
+//! Isolation per lane: own AetherManager, own data dir (own WARP
+//! identity + pid file), own ports (SOCKS 183x, Tor exits 184x, Psiphon
+//! exits 185x, HTTP = SOCKS+1). Lane sessions never touch the main
+//! manager; the frontend additionally ignores global status/log events
+//! while a run is active (see setMatrixActive).
 use crate::aether::profiles::{ConnectionProfile, ExtraTransport, Protocol};
 use crate::error::AetherError;
 use crate::events::{now_millis, MATRIX_EVENT};
 use crate::state::{AppState, ConnectionState};
 use serde::Serialize;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, Mutex,
 };
 use std::time::{Duration, Instant};
@@ -38,6 +45,10 @@ pub struct TestCombo {
     pub budget_secs: u64,
 }
 
+/// Parallel lanes. Each lane is a full core scan (CPU + network heavy);
+/// three is the cap v2rayNG-style testers converge on for desktops.
+pub const LANES: usize = 3;
+
 fn protocol_label(p: &Protocol) -> &'static str {
     match p {
         Protocol::Auto => "auto",
@@ -61,9 +72,8 @@ fn transport_label(t: &ExtraTransport) -> &'static str {
     }
 }
 
-/// The curated matrix: 6 protocols × 5 transports = 30 real connects.
-/// Tor bootstraps slowly (bridges, consensus), Psiphon tunnels in ~tens
-/// of seconds, plain WARP scans in about a minute — budgets match that.
+/// The curated matrix: 6 protocols × 5 transports = 30 real connects,
+/// dealt round-robin across the lanes.
 pub fn matrix_combos() -> Vec<TestCombo> {
     let protocols = [
         Protocol::Auto,
@@ -74,11 +84,11 @@ pub fn matrix_combos() -> Vec<TestCombo> {
         Protocol::Mim,
     ];
     let transports = [
-        (ExtraTransport::None, 90u64),
-        (ExtraTransport::Tor, 300u64),
-        (ExtraTransport::TorOnly, 300u64),
-        (ExtraTransport::Psiphon, 240u64),
-        (ExtraTransport::PsiphonOnly, 240u64),
+        (ExtraTransport::None, 60u64),
+        (ExtraTransport::Tor, 200u64),
+        (ExtraTransport::TorOnly, 200u64),
+        (ExtraTransport::Psiphon, 150u64),
+        (ExtraTransport::PsiphonOnly, 150u64),
     ];
     let mut out = Vec::with_capacity(30);
     for p in protocols {
@@ -93,9 +103,29 @@ pub fn matrix_combos() -> Vec<TestCombo> {
     out
 }
 
+/// Distinct loopback ports per lane: SOCKS 183x, Tor exits 184x,
+/// Psiphon exits 185x. HTTP rides SOCKS+1 via an explicit http_port.
+fn lane_ports(lane: usize) -> (String, String, String, String) {
+    let socks = 1830 + (lane as u16) * 2;
+    (
+        format!("127.0.0.1:{socks}"),
+        format!("127.0.0.1:{}", 1840 + (lane as u16) * 2),
+        format!("127.0.0.1:{}", 1850 + (lane as u16) * 2),
+        (socks + 1).to_string(),
+    )
+}
+
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
-fn emit(app: &AppHandle, combo: &TestCombo, phase: &str, ok: bool, ms: Option<u64>, exit: Option<String>, note: String) {
+fn emit(
+    app: &AppHandle,
+    combo: &TestCombo,
+    phase: &str,
+    ok: bool,
+    ms: Option<u64>,
+    exit: Option<String>,
+    note: String,
+) {
     let ev = MatrixEvent {
         key: format!("{}+{}", protocol_label(&combo.protocol), transport_label(&combo.transport)),
         protocol: protocol_label(&combo.protocol).to_string(),
@@ -160,39 +190,62 @@ pub fn matrix_start(app: AppHandle, state: State<AppState>) -> Result<(), Aether
     CANCEL.store(false, Ordering::SeqCst);
     let mut base = crate::aether::profiles::load(&app);
     // Fresh scan every combo: cached gateways would answer "what worked
-    // last time", not "what reaches from here".
+    // last time", not "what reaches from here". Team stripped: a matrix
+    // run tests transports, never identity (and must never block on an
+    // access-code prompt).
     base.quick_reconnect = false;
-    let manager = state.manager.clone();
+    base.zero_trust_team = String::new();
+    let data_root = crate::aether::app_data_dir(&app);
     let combos = matrix_combos();
-    std::thread::spawn(move || {
-        for combo in &combos {
-            if CANCEL.load(Ordering::SeqCst) {
-                break;
-            }
-            run_combo(&app, &manager, &base, combo);
-            // Cooldown so the next bind never trips on our own TIME_WAIT.
-            for _ in 0..3 {
+    let remaining = Arc::new(AtomicUsize::new(LANES));
+    for lane in 0..LANES {
+        let app = app.clone();
+        let base = base.clone();
+        let queue: Vec<TestCombo> = combos
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % LANES == lane)
+            .map(|(_, c)| TestCombo {
+                protocol: c.protocol.clone(),
+                transport: c.transport.clone(),
+                budget_secs: c.budget_secs,
+            })
+            .collect();
+        let remaining = remaining.clone();
+        std::thread::spawn(move || {
+            let lane_manager = Arc::new(Mutex::new(crate::aether::AetherManager::new()));
+            let lane_dir = data_root.join(format!("matrix-slot-{lane}"));
+            for combo in &queue {
                 if CANCEL.load(Ordering::SeqCst) {
                     break;
                 }
-                std::thread::sleep(Duration::from_secs(1));
+                run_combo(&app, &lane_manager, &lane_dir, &base, combo, lane);
+                // Cooldown so the next bind never trips on our own TIME_WAIT.
+                for _ in 0..2 {
+                    if CANCEL.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
             }
-        }
-        let _ = crate::aether::request_disconnect(&app, &manager);
-        let _ = app.emit(
-            MATRIX_EVENT,
-            &MatrixEvent {
-                key: "__done".to_string(),
-                protocol: String::new(),
-                transport: String::new(),
-                phase: "finished".to_string(),
-                ok: true,
-                ms: None,
-                exit: None,
-                note: format!("matrix finished at {}", now_millis()),
-            },
-        );
-    });
+            let _ = crate::aether::request_disconnect(&app, &lane_manager);
+            if remaining.fetch_sub(1, Ordering::SeqCst) == 1 {
+                let _ = app.emit(
+                    MATRIX_EVENT,
+                    &MatrixEvent {
+                        key: "__done".to_string(),
+                        protocol: String::new(),
+                        transport: String::new(),
+                        phase: "finished".to_string(),
+                        ok: true,
+                        ms: None,
+                        exit: None,
+                        note: format!("matrix finished at {}", now_millis()),
+                    },
+                );
+            }
+        });
+    }
     Ok(())
 }
 
@@ -203,49 +256,66 @@ pub fn matrix_cancel() {
 
 fn run_combo(
     app: &AppHandle,
-    manager: &Arc<Mutex<crate::aether::AetherManager>>,
+    lane: &Arc<Mutex<crate::aether::AetherManager>>,
+    lane_dir: &std::path::PathBuf,
     base: &ConnectionProfile,
     combo: &TestCombo,
+    lane_idx: usize,
 ) {
+    let (bind, tor_bind, psi_bind, http_port) = lane_ports(lane_idx);
     let mut profile = base.clone();
     profile.protocol = combo.protocol.clone();
     profile.extra_transport = combo.transport.clone();
+    profile.bind_address = bind;
+    profile.tor_bind = tor_bind;
+    profile.psiphon_bind = psi_bind;
+    profile.http_port = http_port;
     emit(app, combo, "running", false, None, None, "connecting…".to_string());
-    if crate::aether::start_connect(app.clone(), manager.clone(), Some(profile)).is_err() {
+    if crate::aether::start_connect_in(app.clone(), lane.clone(), lane_dir.clone(), Some(profile))
+        .is_err()
+    {
         emit(app, combo, "done", false, None, None, "could not start".to_string());
         return;
     }
     let deadline = Instant::now() + Duration::from_secs(combo.budget_secs);
     loop {
         if CANCEL.load(Ordering::SeqCst) {
-            let _ = crate::aether::request_disconnect(app, manager);
+            let _ = crate::aether::request_disconnect(app, lane);
             emit(app, combo, "done", false, None, None, "cancelled".to_string());
             return;
         }
-        match manager.lock().unwrap().status() {
+        match lane.lock().unwrap().status() {
             ConnectionState::Connected { socks_addr, .. } => {
                 let socks = socks_addr.clone();
                 match measure_latency(&socks) {
                     Some(ms) => emit(app, combo, "done", true, Some(ms), Some(socks), String::new()),
-                    None => emit(app, combo, "done", false, None, Some(socks), "connected, no traffic".to_string()),
+                    None => emit(
+                        app,
+                        combo,
+                        "done",
+                        false,
+                        None,
+                        Some(socks),
+                        "connected, no traffic".to_string(),
+                    ),
                 }
-                let _ = crate::aether::request_disconnect(app, manager);
+                let _ = crate::aether::request_disconnect(app, lane);
                 return;
             }
             ConnectionState::Error { message, .. } => {
-                let _ = crate::aether::request_disconnect(app, manager);
+                let _ = crate::aether::request_disconnect(app, lane);
                 emit(app, combo, "done", false, None, None, message);
                 return;
             }
             ConnectionState::Idle | ConnectionState::Disconnecting => {
-                // Stopped from outside (user hit disconnect): fail fast.
+                // Stopped from outside: fail fast.
                 emit(app, combo, "done", false, None, None, "stopped".to_string());
                 return;
             }
             _ => {}
         }
         if Instant::now() >= deadline {
-            let _ = crate::aether::request_disconnect(app, manager);
+            let _ = crate::aether::request_disconnect(app, lane);
             emit(app, combo, "done", false, None, None, "timeout".to_string());
             return;
         }
@@ -270,5 +340,19 @@ mod tests {
         let tor = combos.iter().find(|c| c.transport == ExtraTransport::Tor).unwrap();
         let plain = combos.iter().find(|c| c.transport == ExtraTransport::None).unwrap();
         assert!(tor.budget_secs > plain.budget_secs);
+    }
+
+    #[test]
+    fn lanes_get_distinct_ports() {
+        let mut seen = std::collections::HashSet::new();
+        for lane in 0..LANES {
+            let (bind, tor, psi, http) = lane_ports(lane);
+            for p in [bind, tor, psi] {
+                assert!(seen.insert(p.clone()), "port reused: {p}");
+            }
+            // HTTP rides SOCKS+1 of its own lane.
+            let socks_port: u16 = lane_ports(lane).0.rsplit(':').next().unwrap().parse().unwrap();
+            assert_eq!(http, (socks_port + 1).to_string());
+        }
     }
 }
