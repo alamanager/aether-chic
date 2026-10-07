@@ -149,7 +149,11 @@ export function ConnectionInfo() {
     const m = /^(.*):\d+\s*$/.exec(a.trim());
     return m ? m[1] : "127.0.0.1";
   };
-  const socksPort = portOf(socksAddr) ?? portOf(fromBind.socks) ?? 1819;
+  // NOTE: the HTTP default derives from the BIND port (fromBind), never
+  // from socksAddr — in chain modes socksAddr IS the exit listener, and
+  // basing HTTP on it pointed the UI and the system proxy at a dead port
+  // (psiphon chain showed :1822 while the core served :1820).
+  const socksPort = portOf(fromBind.socks) ?? 1819;
   // Same collision rule as the backend: custom wins unless it equals the
   // SOCKS or an exit listener port; otherwise SOCKS+1 (1822 for Tor
   // chains), bumped past any taken port.

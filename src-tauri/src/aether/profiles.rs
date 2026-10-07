@@ -379,7 +379,8 @@ pub const PSIPHON_BIND: &str = "127.0.0.1:1821";
 
 /// Effective Tor exit listener for inside/reverse modes: explicit field
 /// or core default, loopback-mapped for display. None otherwise
-/// (tor-only serves on --bind itself).
+/// (tor-only serves on --bind itself). An unparseable field falls back to
+/// the default exactly like the core does — never None in a chain mode.
 pub fn tor_exit_addr(extra: &ExtraTransport, raw_bind: &str) -> Option<std::net::SocketAddr> {
     if !matches!(
         extra,
@@ -393,6 +394,7 @@ pub fn tor_exit_addr(extra: &ExtraTransport, raw_bind: &str) -> Option<std::net:
         raw_bind.trim()
     };
     v.parse::<std::net::SocketAddr>()
+        .or_else(|_| TOR_BIND.parse())
         .ok()
         .map(|s| super::status::client_addr(&s))
 }
@@ -411,6 +413,7 @@ pub fn psi_exit_addr(extra: &ExtraTransport, raw_bind: &str) -> Option<std::net:
         raw_bind.trim()
     };
     v.parse::<std::net::SocketAddr>()
+        .or_else(|_| PSIPHON_BIND.parse())
         .ok()
         .map(|s| super::status::client_addr(&s))
 }
@@ -1154,7 +1157,7 @@ mod tests {
         assert_eq!(q.frontend_http_addr().to_string(), "127.0.0.1:1821");
         // Garbage bind falls back to the core default, never panics.
         q.psiphon_bind = "garbage".into();
-        assert_eq!(q.psi_exit_addr(), None);
+        assert_eq!(q.psi_exit_addr().map(|s| s.port()), Some(1821));
     }
 
     #[test]
