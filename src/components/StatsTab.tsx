@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SpeedCard } from "@/components/SpeedCard";
@@ -41,6 +42,18 @@ const UserDetail = memo(function UserDetail({ row }: { row: UserRow }) {
 export function StatsTab() {
   const { rows, people, metered, elevated, adminHint, enableAdmin, resolve } = useClientUsage();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [diag, setDiag] = useState<string | null>(null);
+
+  const runDiag = () => {
+    setDiag("checking…");
+    invoke<{ elevated: boolean; v4_rows: number; v6_rows: number; trial: string }>("clients_diag")
+      .then((d) =>
+        setDiag(
+          `elevated=${d.elevated} tcp4=${d.v4_rows} tcp6=${d.v6_rows} counters: ${d.trial}`,
+        ),
+      )
+      .catch(() => setDiag("diag unavailable"));
+  };
 
   const toggle = (ip: string) => {
     setExpanded((prev) => {
@@ -85,6 +98,22 @@ export function StatsTab() {
           </button>
         )}
         {adminHint && <p className="px-1 text-[11px] text-muted-foreground">{adminHint}</p>}
+        {metered === false && elevated === true && (
+          <div className="flex flex-col gap-1 px-1">
+            <button
+              type="button"
+              onClick={runDiag}
+              className="rounded-lg bg-surface-3 px-2 py-1 text-[11px] font-semibold text-foreground transition-colors hover:bg-surface-4"
+            >
+              Admin is on but no bytes — diagnose
+            </button>
+            {diag && (
+              <p className="font-mono text-[10px] leading-4 text-muted-foreground" dir="ltr">
+                {diag}
+              </p>
+            )}
+          </div>
+        )}
         {rows.length === 0 ? (
           <p className="px-1 pb-1 text-[11px] text-muted-foreground">
             No LAN clients this session. Byte columns need admin — without it

@@ -617,6 +617,90 @@ fn parse_host_json(json: &str) -> Option<String> {
     Some(name.to_string())
 }
 
+/// One-shot ESTATS self-test for the diagnostics button: enumerates the
+/// TCP table and tries enabling+reading byte counters on the first row.
+/// Tells exactly which stage fails on a real machine.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiagInfo {
+    pub elevated: bool,
+    pub v4_rows: usize,
+    pub v6_rows: usize,
+    pub trial: String,
+}
+
+#[tauri::command]
+pub fn clients_diag() -> DiagInfo {
+    #[cfg(windows)]
+    {
+        let elevated = is_elevated();
+        let buf4 = read_table(AF_INET);
+        let buf6 = read_table(AF_INET6);
+        let v4_rows = if buf4.len() >= 4 {
+            u32::from_ne_bytes([buf4[0], buf4[1], buf4[2], buf4[3]]) as usize
+        } else {
+            0
+        };
+        let v6_rows = if buf6.len() >= 4 {
+            u32::from_ne_bytes([buf6[0], buf6[1], buf6[2], buf6[3]]) as usize
+        } else {
+            0
+        };
+        let trial = if !elevated {
+            "not elevated — ESTATS unavailable by design".to_string()
+        } else if buf4.len() < 4 + std::mem::size_of::<MibTcpRow>() {
+            "table unreadable".to_string()
+        } else {
+            unsafe {
+                let row = &*(buf4.as_ptr().add(4) as *const MibTcpRow);
+                let rw = DataRw { enable: 1 };
+                let set_rc = SetPerTcpConnectionEStats(
+                    row,
+                    ESTATS_DATA,
+                    &rw,
+                    0,
+                    std::mem::size_of::<DataRw>() as u32,
+                    std::ptr::null(),
+                    0,
+                    0,
+                );
+                if set_rc != NO_ERROR {
+                    format!("Set failed: os error {set_rc}")
+                } else {
+                    let mut rod: DataRod = std::mem::zeroed();
+                    let get_rc = GetPerTcpConnectionEStats(
+                        row,
+                        ESTATS_DATA,
+                        &rw,
+                        0,
+                        std::mem::size_of::<DataRw>() as u32,
+                        std::ptr::null(),
+                        0,
+                        0,
+                        &mut rod,
+                        0,
+                        std::mem::size_of::<DataRod>() as u32,
+                    );
+                    if get_rc != NO_ERROR {
+                        format!("Get failed: os error {get_rc}")
+                    } else {
+                        format!("ok (sample: out={} in={})", rod.data_bytes_out, rod.data_bytes_in)
+                    }
+                }
+            }
+        };
+        DiagInfo { elevated, v4_rows, v6_rows, trial }
+    }
+    #[cfg(not(windows))]
+    {
+        DiagInfo {
+            elevated: false,
+            v4_rows: 0,
+            v6_rows: 0,
+            trial: "non-windows build".to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

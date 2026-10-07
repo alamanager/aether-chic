@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useWindowFocused } from "@/state/windowFocus";
 
 export interface ClientEntry {
   ip: string;
@@ -58,24 +57,39 @@ interface Session {
 }
 
 /**
- * Shared per-user usage: polls proxy_clients while focused, accumulates
- * session time by presence and byte totals by connection-id deltas
- * (survives 5-tuple churn), resolves device names on demand (cached).
- * One poller per mounted consumer; tabs never co-mount.
+ * Shared per-user usage: polls proxy_clients, accumulates session time by
+ * presence and byte totals by connection-id deltas (survives 5-tuple
+ * churn), resolves device names on demand (cached).
+ *
+ * All cross-poll memory lives at MODULE scope, not in component state:
+ * tab switches unmount/remount consumers, and state would wipe first-seen
+ * times and byte totals on every visit. One consumer is mounted at a time
+ * (Pulse footer XOR Stats tab), so a single shared cache is correct.
+ *
+ * Polling is NOT gated on window focus: the focus signal has known
+ * false-negatives on Windows (WebView2 child focus) that silently froze
+ * updates while staring at the app. One 10s poll is negligible.
  */
+const cache = {
+  sessions: {} as Record<string, Session>,
+  totals: {} as Record<string, { up: number; down: number }>,
+  rates: {} as Record<string, { up: number; down: number }>,
+  names: {} as Record<string, string | null>,
+  prevConns: new Map<string, { up: number; down: number }>(),
+  requested: new Set<string>(),
+  lastPoll: 0,
+};
+
 export function useClientUsage() {
   const [data, setData] = useState<EndpointClients[] | null>(null);
   const [spinning, setSpinning] = useState(false);
-  const [sessions, setSessions] = useState<Record<string, Session>>({});
-  const [totals, setTotals] = useState<Record<string, { up: number; down: number }>>({});
-  const [rates, setRates] = useState<Record<string, { up: number; down: number }>>({});
-  const [names, setNames] = useState<Record<string, string | null>>({});
+  // Initialized from the module cache so a tab revisit keeps history.
+  const [sessions, setSessions] = useState<Record<string, Session>>(() => ({ ...cache.sessions }));
+  const [totals, setTotals] = useState<Record<string, { up: number; down: number }>>(() => ({ ...cache.totals }));
+  const [rates, setRates] = useState<Record<string, { up: number; down: number }>>(() => ({ ...cache.rates }));
+  const [names, setNames] = useState<Record<string, string | null>>(() => ({ ...cache.names }));
   const [elevated, setElevated] = useState<boolean | null>(null);
   const [adminHint, setAdminHint] = useState<string | null>(null);
-  const focused = useWindowFocused();
-  const lastPoll = useRef(0);
-  const requested = useRef(new Set<string>());
-  const prevConns = useRef(new Map<string, { up: number; down: number }>());
 
   useEffect(() => {
     invoke<boolean>("is_elevated")
@@ -89,21 +103,20 @@ export function useClientUsage() {
       const r = await invoke<EndpointClients[]>("proxy_clients");
       setData(r);
       const now = Date.now();
-      const dtMs = lastPoll.current === 0 ? 0 : now - lastPoll.current;
-      lastPoll.current = now;
+      const dtMs = cache.lastPoll === 0 ? 0 : now - cache.lastPoll;
+      cache.lastPoll = now;
       const dt = Math.min(dtMs, 30000);
       const seen = new Set<string>();
       r.forEach((e) => e.clients.forEach((c) => seen.add(c.ip)));
-      setSessions((prev) => {
-        const next: Record<string, Session> = { ...prev };
-        seen.forEach((ip) => {
-          const old = next[ip];
-          next[ip] = old
-            ? { firstSeen: old.firstSeen, totalMs: old.totalMs + (dt > 0 ? dt : 0) }
-            : { firstSeen: now, totalMs: 0 };
-        });
-        return next;
+      const ns: Record<string, Session> = { ...cache.sessions };
+      seen.forEach((ip) => {
+        const old = ns[ip];
+        ns[ip] = old
+          ? { firstSeen: old.firstSeen, totalMs: old.totalMs + (dt > 0 ? dt : 0) }
+          : { firstSeen: now, totalMs: 0 };
       });
+      cache.sessions = ns;
+      setSessions(ns);
       if (dt > 0) {
         const dtS = dt / 1000;
         const nt: Record<string, { up: number; down: number }> = {};
@@ -111,9 +124,9 @@ export function useClientUsage() {
         r.forEach((e) =>
           e.clients.forEach((c) => {
             if (c.bytes_up === null || c.bytes_down === null) return;
-            const prev = prevConns.current.get(c.conn_id);
+            const prev = cache.prevConns.get(c.conn_id);
             const cur = { up: c.bytes_up, down: c.bytes_down };
-            prevConns.current.set(c.conn_id, cur);
+            cache.prevConns.set(c.conn_id, cur);
             if (!prev) return;
             const du = c.bytes_up >= prev.up ? c.bytes_up - prev.up : c.bytes_up;
             const dd = c.bytes_down >= prev.down ? c.bytes_down - prev.down : c.bytes_down;
@@ -126,16 +139,17 @@ export function useClientUsage() {
           }),
         );
         if (Object.keys(nt).length > 0) {
-          setTotals((prev) => {
-            const next = { ...prev };
-            Object.entries(nt).forEach(([ip, d]) => {
-              const o = next[ip] ?? { up: 0, down: 0 };
-              next[ip] = { up: o.up + d.up, down: o.down + d.down };
-            });
-            return next;
+          const merged = { ...cache.totals };
+          Object.entries(nt).forEach(([ip, d]) => {
+            const o = merged[ip] ?? { up: 0, down: 0 };
+            merged[ip] = { up: o.up + d.up, down: o.down + d.down };
           });
+          cache.totals = merged;
+          setTotals(merged);
+          cache.rates = nr;
           setRates(nr);
         } else {
+          cache.rates = {};
           setRates({});
         }
       }
@@ -146,22 +160,28 @@ export function useClientUsage() {
     }
   }, []);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- mount fetch + focus-gated poll */
+  /* eslint-disable react-hooks/set-state-in-effect -- mount fetch + poll.
+   * Deliberately NOT gated on window focus (see module doc). */
   useEffect(() => {
-    lastPoll.current = 0;
+    cache.lastPoll = 0;
     void refresh();
-    if (!focused) return;
     const id = setInterval(() => void refresh(), 10000);
     return () => clearInterval(id);
-  }, [refresh, focused]);
+  }, [refresh]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const resolve = useCallback((ip: string) => {
-    if (requested.current.has(ip)) return;
-    requested.current.add(ip);
+    if (cache.requested.has(ip)) return;
+    cache.requested.add(ip);
     invoke<string | null>("resolve_host", { ip })
-      .then((n) => setNames((m) => ({ ...m, [ip]: n })))
-      .catch(() => setNames((m) => ({ ...m, [ip]: null })));
+      .then((n) => {
+        cache.names = { ...cache.names, [ip]: n };
+        setNames(cache.names);
+      })
+      .catch(() => {
+        cache.names = { ...cache.names, [ip]: null };
+        setNames(cache.names);
+      });
   }, []);
 
   const enableAdmin = useCallback(async (): Promise<boolean> => {

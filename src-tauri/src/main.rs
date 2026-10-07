@@ -53,6 +53,7 @@ fn main() {
             commands::set_system_proxy,
             clients::proxy_clients,
             clients::resolve_host,
+            clients::clients_diag,
             clients::is_elevated,
             clients::request_admin,
         ])
