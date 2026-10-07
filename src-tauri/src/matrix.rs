@@ -1,6 +1,5 @@
 //! Connection matrix lab: try every meaningful protocol × transport
-//! combo for real, three lanes in parallel (like v2rayNG/sing-box test
-//! with capped concurrency — sequential full connects would take hours).
+//! combo for real, all at once (one lane per combo).
 //!
 //! The matrix is curated, not cartesian: reverses are MASQUE-only by
 //! construction (covered by the masque rows), scan/noize/ip come from the
@@ -45,10 +44,6 @@ pub struct TestCombo {
     pub budget_secs: u64,
 }
 
-/// Parallel lanes. Each lane is a full core scan (CPU + network heavy);
-/// three is the cap v2rayNG-style testers converge on for desktops.
-pub const LANES: usize = 3;
-
 fn protocol_label(p: &Protocol) -> &'static str {
     match p {
         Protocol::Auto => "auto",
@@ -72,8 +67,9 @@ fn transport_label(t: &ExtraTransport) -> &'static str {
     }
 }
 
-/// The curated matrix: 6 protocols × 5 transports = 30 real connects,
-/// dealt round-robin across the lanes.
+/// The curated matrix: 6 protocols × 3 transports = 18 real connects,
+/// ALL at once (one lane per combo). No Tor rows — Tor bootstraps for
+/// minutes and never answers "does it connect" quickly; test Tor by hand.
 pub fn matrix_combos() -> Vec<TestCombo> {
     let protocols = [
         Protocol::Auto,
@@ -85,12 +81,10 @@ pub fn matrix_combos() -> Vec<TestCombo> {
     ];
     let transports = [
         (ExtraTransport::None, 60u64),
-        (ExtraTransport::Tor, 200u64),
-        (ExtraTransport::TorOnly, 200u64),
         (ExtraTransport::Psiphon, 150u64),
         (ExtraTransport::PsiphonOnly, 150u64),
     ];
-    let mut out = Vec::with_capacity(30);
+    let mut out = Vec::with_capacity(18);
     for p in protocols {
         for (t, b) in transports.iter() {
             out.push(TestCombo {
@@ -103,14 +97,13 @@ pub fn matrix_combos() -> Vec<TestCombo> {
     out
 }
 
-/// Distinct loopback ports per lane: SOCKS 183x, Tor exits 184x,
-/// Psiphon exits 185x. HTTP rides SOCKS+1 via an explicit http_port.
-fn lane_ports(lane: usize) -> (String, String, String, String) {
+/// Distinct loopback ports per lane: SOCKS 183x, Psiphon exits 190x,
+/// HTTP = SOCKS+1 (odd, never collides with the even ranges).
+fn lane_ports(lane: usize) -> (String, String, String) {
     let socks = 1830 + (lane as u16) * 2;
     (
         format!("127.0.0.1:{socks}"),
-        format!("127.0.0.1:{}", 1840 + (lane as u16) * 2),
-        format!("127.0.0.1:{}", 1850 + (lane as u16) * 2),
+        format!("127.0.0.1:{}", 1900 + (lane as u16) * 2),
         (socks + 1).to_string(),
     )
 }
@@ -197,14 +190,16 @@ pub fn matrix_start(app: AppHandle, state: State<AppState>) -> Result<(), Aether
     base.zero_trust_team = String::new();
     let data_root = crate::aether::app_data_dir(&app);
     let combos = matrix_combos();
-    let remaining = Arc::new(AtomicUsize::new(LANES));
-    for lane in 0..LANES {
+    // One lane per combo: everything simultaneously.
+    let lanes = combos.len();
+    let remaining = Arc::new(AtomicUsize::new(lanes));
+    for lane in 0..lanes {
         let app = app.clone();
         let base = base.clone();
         let queue: Vec<TestCombo> = combos
             .iter()
             .enumerate()
-            .filter(|(i, _)| i % LANES == lane)
+            .filter(|(i, _)| i % lanes == lane)
             .map(|(_, c)| TestCombo {
                 protocol: c.protocol.clone(),
                 transport: c.transport.clone(),
@@ -263,12 +258,11 @@ fn run_combo(
     combo: &TestCombo,
     lane_idx: usize,
 ) {
-    let (bind, tor_bind, psi_bind, http_port) = lane_ports(lane_idx);
+    let (bind, psi_bind, http_port) = lane_ports(lane_idx);
     let mut profile = base.clone();
     profile.protocol = combo.protocol.clone();
     profile.extra_transport = combo.transport.clone();
     profile.bind_address = bind;
-    profile.tor_bind = tor_bind;
     profile.psiphon_bind = psi_bind;
     profile.http_port = http_port;
     emit(app, combo, "running", false, None, None, "connecting…".to_string());
@@ -329,29 +323,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn matrix_has_30_curated_combos() {
+    fn matrix_has_18_curated_combos() {
         let combos = matrix_combos();
-        assert_eq!(combos.len(), 30);
-        // No reverses: MASQUE-only by construction, covered by masque rows.
+        assert_eq!(combos.len(), 18);
+        // No Tor at all (bootstrap answers nothing quickly), no reverses
+        // (MASQUE-only, covered by masque rows).
         assert!(!combos.iter().any(|c| matches!(
             c.transport,
-            ExtraTransport::TorReverse | ExtraTransport::PsiphonReverse
+            ExtraTransport::Tor
+                | ExtraTransport::TorOnly
+                | ExtraTransport::TorReverse
+                | ExtraTransport::PsiphonReverse
         )));
         // Budgets match bootstrap reality.
-        let tor = combos.iter().find(|c| c.transport == ExtraTransport::Tor).unwrap();
+        let psi = combos.iter().find(|c| c.transport == ExtraTransport::Psiphon).unwrap();
         let plain = combos.iter().find(|c| c.transport == ExtraTransport::None).unwrap();
-        assert!(tor.budget_secs > plain.budget_secs);
+        assert!(psi.budget_secs > plain.budget_secs);
     }
 
     #[test]
     fn lanes_get_distinct_ports() {
+        let n = matrix_combos().len();
         let mut seen = std::collections::HashSet::new();
-        for lane in 0..LANES {
-            let (bind, tor, psi, http) = lane_ports(lane);
-            for p in [bind, tor, psi] {
+        for lane in 0..n {
+            let (bind, psi, http) = lane_ports(lane);
+            for p in [bind, psi] {
                 assert!(seen.insert(p.clone()), "port reused: {p}");
             }
-            // HTTP rides SOCKS+1 of its own lane.
+            // HTTP rides SOCKS+1 of its own lane, odd — never an exit.
             let socks_port: u16 = lane_ports(lane).0.rsplit(':').next().unwrap().parse().unwrap();
             assert_eq!(http, (socks_port + 1).to_string());
         }

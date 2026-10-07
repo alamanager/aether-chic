@@ -17,7 +17,7 @@ interface MatrixEvent {
 }
 
 const PROTOCOLS = ["auto", "masque", "wireguard", "gool", "gool-classic", "mim"] as const;
-const TRANSPORTS = ["warp", "tor", "tor-only", "psiphon", "psiphon-only"] as const;
+const TRANSPORTS = ["warp", "psiphon", "psiphon-only"] as const;
 
 const toStoreProtocol = (p: string): string => (p === "gool-classic" ? "gool_classic" : p);
 const toStoreTransport = (t: string): string => (t === "warp" ? "none" : t.replace("-", "_"));
@@ -106,9 +106,9 @@ export function MatrixTab() {
           )}
         </div>
         <p className="px-1 text-[11px] leading-5 text-muted-foreground">
-          Tries all 30 combos for real on 3 parallel lanes and times a fetch
-          through each tunnel. Tor rows take minutes (bootstrap). Cancel
-          anytime — finished rows stay. Leaving this tab aborts the run.
+          Tries all 18 combos at once (no Tor rows — Tor never answers
+          fast) and times a fetch through each tunnel. Cancel anytime —
+          finished rows stay. Leaving this tab aborts the run.
         </p>
         <div className="flex gap-2">
           <button
