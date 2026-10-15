@@ -314,7 +314,7 @@ fn parse_vmess(raw: &str) -> Result<ParsedLink, LinkError> {
     } else {
         main.as_str()
     };
-    let decoded = b64_decode(body)?;
+    let decoded = b64_decode(body).map_err(LinkError::Malformed)?;
     let v: Value =
         serde_json::from_slice(&decoded).map_err(|e| LinkError::Malformed(format!("vmess json: {e}")))?;
     let g = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
