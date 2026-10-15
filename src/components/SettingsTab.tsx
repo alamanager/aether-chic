@@ -1,4 +1,5 @@
 ﻿import { useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, Fingerprint, Gauge, Globe2, Info, Network, Route, ShieldCheck, Zap } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
@@ -137,6 +138,70 @@ function EchPresetRow() {
           <TextOpt value={ech} onChange={api.setEch} disabled={locked} placeholder="auto or base64 key" label="ECH mode" mono />
           <TextOpt value={echDns} onChange={api.setEchDns} disabled={locked} placeholder="Key resolver (default udp://1.1.1.1)" label="ECH DNS resolver" mono />
           <TextOpt value={echDomain} onChange={api.setEchDomain} disabled={locked} placeholder="Key domain (default cloudflare-ech.com)" label="ECH domain" mono />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * DoH resolver ranking: times one query per well-known resolver so the
+ * ECH key lookup (and DNS generally) uses the fastest reachable one.
+ */
+function DnsScanRow() {
+  const status = connectionStore((s) => s.status);
+  const api = connectionStore.getState();
+  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<{ name: string; url: string; ms: number | null }[] | null>(null);
+  const locked = status.state !== "Idle" && status.state !== "Error";
+
+  const scan = async () => {
+    setBusy(true);
+    try {
+      const r = await invoke<{ name: string; url: string; ms: number | null }[]>("dns_scan");
+      setRows(r);
+    } catch {
+      setRows(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const best = (rows ?? []).filter((r) => r.ms !== null).sort((a, b) => (a.ms ?? 0) - (b.ms ?? 0))[0];
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Fastest key resolver</span>
+        <button
+          type="button"
+          onClick={() => void scan()}
+          disabled={busy}
+          className="rounded-lg bg-surface-3 px-2 py-1 text-[11px] font-bold text-foreground transition-colors hover:bg-surface-4 disabled:opacity-50"
+        >
+          {busy ? "Scanning…" : rows ? "Re-scan" : "Scan resolvers"}
+        </button>
+      </div>
+      {rows && (
+        <div className="flex flex-col gap-0.5">
+          {rows.map((r) => (
+            <div key={r.name} className="flex items-center justify-between px-1 font-mono text-[11px]" dir="ltr">
+              <span className="text-foreground">{r.name}</span>
+              <span className={r.ms === null ? "text-muted-foreground" : "text-status-connected"}>
+                {r.ms === null ? "no answer" : `${r.ms}ms`}
+              </span>
+            </div>
+          ))}
+          {best && (
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => api.setEchDns(best.url)}
+              className="mt-1 rounded-lg bg-surface-3 px-2 py-1.5 text-[11px] font-bold text-foreground transition-colors hover:bg-surface-4 disabled:opacity-50"
+            >
+              Use {best.name} for ECH + DNS
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -319,6 +384,10 @@ export function SettingsTab() {
         <FieldRow label="Encrypted Client Hello"
           tooltip="Hides the server name inside your handshake so filters can't read or block it. Automatic = look the key up securely, no pasting. Needs a MASQUE protocol; some hostile networks drop ECH handshakes — if connects fail with it on, try Off.">
           <EchPresetRow />
+        </FieldRow>
+        <FieldRow label="Resolver ranking"
+          tooltip="Times one encrypted-DNS query per well-known resolver from THIS machine (not through the tunnel). One tap pastes the winner into the ECH resolver field above.">
+          <DnsScanRow />
         </FieldRow>
         <FieldRow label="TLS fingerprint" tooltip="TLS 1.2 cipher suites and groups (Chrome defaults when empty). GREASE values are included like Chrome unless disabled.">
           <div className="flex flex-col gap-1.5">

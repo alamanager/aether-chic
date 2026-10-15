@@ -13,6 +13,8 @@ use std::collections::HashMap;
 pub enum Engine {
     SingBox,
     Xray,
+    Ssh,
+    Ikev2,
 }
 
 #[derive(Debug, Clone)]
@@ -166,7 +168,8 @@ pub fn parse_link(raw: &str) -> Result<ParsedLink, LinkError> {
         "vpn" => Err(LinkError::Unsupported(
             "Amnezia vpn:// needs the Amnezia engine (coming)".into(),
         )),
-        "ssh" => Err(LinkError::Unsupported("SSH engine not bundled yet".into())),
+        "ssh" => parse_ssh(raw),
+        "ikev2" => parse_ikev2(raw),
         "" => Err(LinkError::Malformed("empty link".into())),
         other => Err(LinkError::Unsupported(format!("unknown scheme: {other}"))),
     }
@@ -614,6 +617,56 @@ fn parse_socks(raw: &str, is_http: bool) -> Result<ParsedLink, LinkError> {
     })
 }
 
+/// Our own conventions (documented in the SSH/IKEv2 forms):
+/// ssh://user@host:port?key=BASE64 (key required — no passwords headless),
+/// ikev2://user:pass@server#name.
+fn parse_ssh(raw: &str) -> Result<ParsedLink, LinkError> {
+    let (main, name) = split_name(raw);
+    let u = url_of(&main, "ssh")?;
+    let user = pct_decode(u.username());
+    let host = u.host_str().unwrap_or("").to_string();
+    let port = u.port().unwrap_or(22);
+    if user.is_empty() || host.is_empty() {
+        return Err(LinkError::Malformed("ssh needs user@host".into()));
+    }
+    let q: HashMap<String, String> =
+        u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+    // Key travels inside the link only as base64 (?key=...); the form
+    // pastes raw key text instead. Either way it lands in one field.
+    let key = q.get("key").cloned().unwrap_or_default();
+    let params = serde_json::json!({
+        "user": user, "host": host, "port": port, "key": key,
+    });
+    Ok(ParsedLink {
+        name: name_or(&name, &host),
+        engine: Engine::Ssh,
+        outbound: params,
+        server_host: host,
+        server_port: port,
+    })
+}
+
+fn parse_ikev2(raw: &str) -> Result<ParsedLink, LinkError> {
+    let (main, name) = split_name(raw);
+    let u = url_of(&main, "ikev2")?;
+    let user = pct_decode(u.username());
+    let pass = u.password().map(pct_decode).unwrap_or_default();
+    let server = u.host_str().unwrap_or("").to_string();
+    if user.is_empty() || server.is_empty() || pass.is_empty() {
+        return Err(LinkError::Malformed("ikev2 needs user:pass@server".into()));
+    }
+    let params = serde_json::json!({
+        "user": user, "pass": pass, "server": server,
+    });
+    Ok(ParsedLink {
+        name: name_or(&name, &server),
+        engine: Engine::Ikev2,
+        outbound: params,
+        server_host: server,
+        server_port: 500,
+    })
+}
+
 /// Top-level sing-box runtime config wrapping one outbound.
 pub fn singbox_config(outbound: &Value) -> Value {
     let mut proxy = outbound.clone();
@@ -726,10 +779,14 @@ mod tests {
     #[test]
     fn recognized_but_engine_less() {
         assert!(matches!(parse_link("vpn://abc").unwrap_err(), LinkError::Unsupported(_)));
-        assert!(matches!(parse_link("ssh://u@example.com:22").unwrap_err(), LinkError::Unsupported(_)));
         assert!(matches!(parse_link("hysteria://u@example.com:443").unwrap_err(), LinkError::Unsupported(_)));
         assert!(matches!(parse_link("foo://x").unwrap_err(), LinkError::Unsupported(_)));
         assert!(matches!(parse_link("vless://nouuid@example.com").unwrap_err(), LinkError::Malformed(_)));
+        // ssh:// and ikev2:// are first-class now (system client / OS VPN).
+        let s = parse_link("ssh://u@example.com:22").unwrap();
+        assert_eq!(s.engine, Engine::Ssh);
+        let k = parse_link("ikev2://u:p@example.com#V").unwrap();
+        assert_eq!(k.engine, Engine::Ikev2);
     }
 
     #[test]

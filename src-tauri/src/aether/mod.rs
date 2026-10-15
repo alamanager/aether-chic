@@ -639,6 +639,7 @@ pub fn submit_access_code(
 /// blocks briefly rather than spawning a thread, and skips emitting events
 /// nobody is left to receive.
 pub fn shutdown_blocking(manager: &Arc<Mutex<AetherManager>>, data_dir: &Path) {
+    crate::manual::teardown_ikev2_if_active();
     let mut mgr = manager.lock().unwrap();
     if let Some(session) = mgr.session.as_mut() {
         session.send_ctrl_c();

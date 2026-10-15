@@ -10,8 +10,10 @@ mod focus;
 mod links;
 mod manual;
 mod matrix;
+mod nettools;
 mod state;
 mod subs;
+mod vault;
 mod sysproxy;
 mod tray;
 
@@ -65,6 +67,12 @@ fn main() {
             manual::manual_import_ovpn,
             manual::manual_connect,
             manual::tcp_ping,
+            manual::manual_ikev2_up,
+            manual::manual_ikev2_down,
+            nettools::speed_test,
+            nettools::dns_scan,
+            vault::vault_seal,
+            vault::vault_open,
             matrix::matrix_start,
             matrix::matrix_cancel,
         ])

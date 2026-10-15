@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Copy, Globe, MonitorUp, RefreshCw, Server } from "lucide-react";
+import { Check, Copy, Globe, MonitorUp, QrCode, RefreshCw, Server } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { Switch } from "@/components/ui/switch";
 import { useConnectionStore } from "@/state/connectionStore";
 import { cn } from "@/lib/utils";
@@ -191,8 +192,11 @@ export function ConnectionInfo() {
         : "127.0.0.1:1870"
       : `${hostOf(fromBind.socks)}:${httpPort}`;
 
-  const fetchIp = useCallback(async () => {
-    setIpLoading(true);
+  // IKEv2 has no SOCKS endpoints (system-wide tunnel): dedicated rows.
+  const isSystemVpn = manualMode && connected && socksAddr === "system-vpn";
+  const [showQr, setShowQr] = useState(false);
+
+  const fetchIp = useCallback(async () => {    setIpLoading(true);
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 8000);
@@ -290,15 +294,21 @@ export function ConnectionInfo() {
               {connected ? "LIVE" : "WORKING"}
             </span>
           </div>
-          <Row icon={<Server className="size-4" />} label="SOCKS5" value={socksAddr}
-            onCopy={() => void doCopy("socks", socksAddr)} copied={copied === "socks"} />
-          <Row icon={<Server className="size-4" />} label="HTTP" value={httpAddr}
-            onCopy={() => void doCopy("http", httpAddr)} copied={copied === "http"} />
-          {torExit && (
+          {isSystemVpn ? (
+            <Row icon={<Server className="size-4" />} label="Tunnel" value="System VPN (IKEv2)" />
+          ) : (
+            <>
+              <Row icon={<Server className="size-4" />} label="SOCKS5" value={socksAddr}
+                onCopy={() => void doCopy("socks", socksAddr)} copied={copied === "socks"} />
+              <Row icon={<Server className="size-4" />} label="HTTP" value={httpAddr}
+                onCopy={() => void doCopy("http", httpAddr)} copied={copied === "http"} />
+            </>
+          )}
+          {!isSystemVpn && torExit && (
             <Row icon={<Server className="size-4" />} label="Tor exit" value={torExit}
               onCopy={() => void doCopy("tor", torExit)} copied={copied === "tor"} />
           )}
-          {psiExit && (
+          {!isSystemVpn && psiExit && (
             <Row icon={<Server className="size-4" />} label="Psiphon exit" value={psiExit}
               onCopy={() => void doCopy("psi", psiExit)} copied={copied === "psi"} />
           )}
@@ -318,18 +328,38 @@ export function ConnectionInfo() {
               <RefreshCw className={`size-4 ${ipLoading ? "animate-spin" : ""}`} />
             </button>
           </div>
-          <div className="flex min-h-[44px] items-center justify-between rounded-xl px-1">
-            <span className="flex items-center gap-2 text-xs text-muted-foreground">
-              <MonitorUp className="size-4" />
-              System proxy
-            </span>
-            <Switch
-              checked={sysProxy ?? false}
-              disabled={proxyBusy || sysProxy === null}
-              onCheckedChange={(on) => void toggleSysProxy(on)}
-              aria-label="Route system traffic through the tunnel (Windows system proxy)"
-            />
-          </div>
+          {!isSystemVpn && (
+            <div className="flex min-h-[44px] items-center justify-between rounded-xl px-1">
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                <MonitorUp className="size-4" />
+                System proxy
+              </span>
+              <Switch
+                checked={sysProxy ?? false}
+                disabled={proxyBusy || sysProxy === null}
+                onCheckedChange={(on) => void toggleSysProxy(on)}
+                aria-label="Route system traffic through the tunnel (Windows system proxy)"
+              />
+            </div>
+          )}
+          {!isSystemVpn && (
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => setShowQr((v) => !v)}
+                aria-expanded={showQr}
+                className="flex items-center gap-1.5 px-1 text-[11px] font-bold text-muted-foreground hover:text-foreground"
+              >
+                <QrCode className="size-3.5" />
+                Share as QR (phones scan this)
+              </button>
+              {showQr && (
+                <div className="grid place-items-center rounded-xl bg-white p-3">
+                  <QRCodeSVG value={`socks5h://${socksAddr}`} size={148} />
+                </div>
+              )}
+            </div>
+          )}
           {proxyHint && <p className="px-1 text-[11px] leading-5 text-muted-foreground">{proxyHint}</p>}
         </motion.div>
       )}

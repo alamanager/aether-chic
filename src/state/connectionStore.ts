@@ -106,12 +106,13 @@ interface ConnectionState {
   removeConfig: (id: string) => void;
   setActiveConfig: (id: string | null) => void;
   setConfigLatency: (id: string, ms: number | null) => void;
+  setConfigVia: (id: string, via: string | null) => void;
 }
 
 export interface ManualConfig {
   id: string;
   name: string;
-  engine: "singbox" | "xray";
+  engine: "singbox" | "xray" | "ssh" | "ikev2";
   /** Engine outbound object (sing-box `type` / xray `protocol` shape). */
   outbound?: unknown;
   /** Pasted full runtime config (used verbatim). */
@@ -121,6 +122,11 @@ export interface ManualConfig {
   port: number;
   source: string;
   latencyMs?: number | null;
+  /** SSH/IKEv2 credential material (key text or password). */
+  username?: string;
+  secret?: string;
+  /** Chain through another config of the same engine (its id). */
+  via?: string | null;
 }
 
 const MANUAL_KEY = "aether-manual-v1";
@@ -161,7 +167,42 @@ export function buildSingboxRuntime(outbound: unknown): string {
   });
 }
 
-/** Runtime config wrapping one outbound (mirrors links::xray_config). */
+/** Full runtime JSON for one manual config, honoring `via` chains
+ * (same-engine only — mixed chains are refused loudly, never guessed). */
+export function buildManualRuntime(all: ManualConfig[], cfg: ManualConfig): string {
+  if (cfg.rawJson !== undefined && cfg.rawJson !== null) return JSON.stringify(cfg.rawJson);
+  if (cfg.engine === "ssh") {
+    return JSON.stringify({
+      host: cfg.host,
+      port: cfg.port,
+      user: cfg.username ?? "",
+      key: cfg.secret ?? "",
+    });
+  }
+  const via = cfg.via ? all.find((c) => c.id === cfg.via) : undefined;
+  if (via && via.engine !== cfg.engine) {
+    throw new Error(`Chain engine mismatch (${cfg.engine} via ${via.engine})`);
+  }
+  const base = cfg.engine === "xray" ? JSON.parse(buildXrayRuntime(cfg.outbound)) : JSON.parse(buildSingboxRuntime(cfg.outbound));
+  if (!via || via.outbound === undefined) return JSON.stringify(base);
+  const hop = (
+    typeof via.outbound === "object" && via.outbound !== null ? { ...(via.outbound as Record<string, unknown>) } : {}
+  ) as Record<string, unknown>;
+  if (cfg.engine === "singbox") {
+    hop.tag = "via";
+    const outs = (base.outbounds as Record<string, unknown>[]);
+    const proxy = outs[0] as Record<string, unknown>;
+    proxy.detour = "via";
+    outs.splice(1, 0, hop);
+  } else {
+    hop.tag = "via";
+    const outs = (base.outbounds as Record<string, unknown>[]);
+    const proxy = outs[0] as Record<string, unknown>;
+    proxy.proxySettings = { tag: "via", transportLayer: true };
+    outs.splice(1, 0, hop);
+  }
+  return JSON.stringify(base);
+}
 export function buildXrayRuntime(outbound: unknown): string {
   const proxy = (
     typeof outbound === "object" && outbound !== null ? { ...(outbound as Record<string, unknown>) } : {}
@@ -276,12 +317,16 @@ export const useConnectionStore = create<ConnectionState>((set, get) => {
         return;
       }
       try {
-        const configJson =
-          cfg.rawJson !== undefined && cfg.rawJson !== null
-            ? JSON.stringify(cfg.rawJson)
-            : cfg.engine === "xray"
-              ? buildXrayRuntime(cfg.outbound)
-              : buildSingboxRuntime(cfg.outbound);
+        if (cfg.engine === "ikev2") {
+          await invoke("manual_ikev2_up", {
+            server: cfg.host,
+            user: cfg.username ?? "",
+            pass: cfg.secret ?? "",
+            name: cfg.name,
+          });
+          return;
+        }
+        const configJson = buildManualRuntime(s.configs, cfg);
         await invoke("manual_connect", { engine: cfg.engine, configJson });
       } catch (e) {
         const message = String(e);
@@ -309,8 +354,14 @@ export const useConnectionStore = create<ConnectionState>((set, get) => {
     }
   },
 
-  disconnect: async () => {
+    disconnect: async () => {
     try {
+      const s = get();
+      const cfg = s.manualMode ? s.configs.find((c) => c.id === s.activeConfigId) : undefined;
+      if (cfg?.engine === "ikev2") {
+        // The OS tunnel outlives our process kill — tear it down first.
+        await invoke("manual_ikev2_down").catch(() => {});
+      }
       await invoke("disconnect");
     } catch {
       // Backend rejects disconnect() when there's nothing to stop (already
@@ -488,6 +539,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => {
   setConfigLatency: (id, ms) => {
     set((s) => ({
       configs: s.configs.map((c) => (c.id === id ? { ...c, latencyMs: ms } : c)),
+    }));
+    persistManual();
+  },
+
+  setConfigVia: (id, via) => {
+    set((s) => ({
+      configs: s.configs.map((c) => (c.id === id ? { ...c, via } : c)),
     }));
     persistManual();
   },

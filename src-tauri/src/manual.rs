@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager};
 pub enum SidecarKind {
     SingBox,
     Xray,
+    Ssh,
 }
 
 /// Fixed loopback endpoints for manual mode (far from the auto range and
@@ -39,6 +40,13 @@ pub fn binary_name(kind: SidecarKind) -> &'static str {
                 "xray"
             }
         }
+        SidecarKind::Ssh => {
+            if cfg!(windows) {
+                "ssh.exe"
+            } else {
+                "ssh"
+            }
+        }
     }
 }
 
@@ -50,6 +58,21 @@ pub fn manual_addrs() -> (String, String) {
 }
 
 fn resolve_sidecar(app: &AppHandle, kind: SidecarKind) -> Result<PathBuf, AetherError> {
+    // SSH rides the OS client (OpenSSH ships with Windows 10+, macOS and
+    // Linux) — key-based only; passwords can't go through headless.
+    if kind == SidecarKind::Ssh {
+        for cand in [
+            "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+            "/usr/bin/ssh",
+            "/bin/ssh",
+        ] {
+            let p = PathBuf::from(cand);
+            if p.exists() {
+                return Ok(p);
+            }
+        }
+        return Err(AetherError::BinaryMissing("ssh client".into()));
+    }
     let path = app
         .path()
         .resource_dir()
@@ -103,20 +126,52 @@ pub fn start_manual(
     let data_dir = crate::aether::app_data_dir(&app);
     let manual_dir = data_dir.join("manual");
     std::fs::create_dir_all(&manual_dir).map_err(|e| AetherError::Internal(e.to_string()))?;
-    let cfg_path = manual_dir.join(match kind {
-        SidecarKind::SingBox => "sing-box.json",
-        SidecarKind::Xray => "xray.json",
-    });
-    std::fs::write(&cfg_path, config_json).map_err(|e| AetherError::Internal(e.to_string()))?;
 
     let mut cmd = std::process::Command::new(&binary);
-    match kind {
-        SidecarKind::SingBox => {
-            cmd.arg("run").arg("-c").arg(&cfg_path);
+    if kind == SidecarKind::Ssh {
+        #[derive(serde::Deserialize)]
+        struct SshConf {
+            host: String,
+            port: u16,
+            user: String,
+            key: String,
         }
-        SidecarKind::Xray => {
-            cmd.arg("run").arg("-c").arg(&cfg_path);
+        let c: SshConf = serde_json::from_str(config_json)
+            .map_err(|e| AetherError::Internal(format!("bad ssh config: {e}")))?;
+        if c.host.is_empty() || c.user.is_empty() || c.key.trim().is_empty() {
+            return Err(AetherError::Internal("ssh needs host, user and key".into()));
         }
+        let key_path = manual_dir.join("ssh_key");
+        std::fs::write(&key_path, c.key.trim()).map_err(|e| AetherError::Internal(e.to_string()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
+        cmd.args([
+            "-D",
+            "127.0.0.1:1870",
+            "-N",
+            "-i",
+            &key_path.to_string_lossy().into_owned(),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ConnectTimeout=30",
+            "-p",
+            &c.port.to_string(),
+            &format!("{}@{}", c.user, c.host),
+        ]);
+    } else {
+        let cfg_path = manual_dir.join(match kind {
+            SidecarKind::SingBox => "sing-box.json",
+            SidecarKind::Xray => "xray.json",
+            SidecarKind::Ssh => unreachable!("handled above"),
+        });
+        std::fs::write(&cfg_path, config_json).map_err(|e| AetherError::Internal(e.to_string()))?;
+        cmd.arg("run").arg("-c").arg(&cfg_path);
     }
     let mut session = ChildSession::spawn(cmd).map_err(|e| AetherError::Internal(e.to_string()))?;
     let stdout = session.take_stdout();
@@ -265,6 +320,8 @@ fn engine_str(e: crate::links::Engine) -> &'static str {
     match e {
         crate::links::Engine::SingBox => "singbox",
         crate::links::Engine::Xray => "xray",
+        crate::links::Engine::Ssh => "ssh",
+        crate::links::Engine::Ikev2 => "ikev2",
     }
 }
 
@@ -353,6 +410,7 @@ pub fn manual_connect(
 ) -> Result<(), AetherError> {
     let kind = match engine.as_str() {
         "xray" => SidecarKind::Xray,
+        "ssh" => SidecarKind::Ssh,
         "singbox" => SidecarKind::SingBox,
         _ => return Err(AetherError::Internal("unknown engine".into())),
     };
@@ -388,6 +446,207 @@ pub fn tcp_ping(host: String, port: u16) -> Result<u64, String> {
         }
     }
     best.ok_or_else(|| "unreachable".into())
+}
+
+/// IKEv2 via the OS client (Windows: built-in VPN + rasdial; EAP-MSCHAPv2
+/// user/pass only — PSK/cert need different stores, like ZedSecure).
+/// No SOCKS port exists (system-wide tunnel); the placeholder session
+/// below only feeds the shared disconnect path. Other platforms: refused
+/// with a clear message until their backends land.
+static IKEV2_ENTRY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn ikev2_active() -> bool {
+    IKEV2_ENTRY.lock().unwrap().is_some()
+}
+
+fn ps_run(script: &str) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("powershell");
+    crate::cmd::silent(&mut cmd);
+    let out = cmd
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .map_err(|e| format!("spawn: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+fn ikev2_name(name: &str) -> String {
+    let clean: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    let clean = clean.trim_matches('-').to_string();
+    format!("Aether-{}", if clean.is_empty() { "ikev2" } else { &clean[..clean.len().min(40)] })
+}
+
+#[tauri::command]
+pub fn manual_ikev2_up(
+    app: AppHandle,
+    state: tauri::State<crate::state::AppState>,
+    server: String,
+    user: String,
+    pass: String,
+    name: String,
+) -> Result<(), AetherError> {
+    #[cfg(not(windows))]
+    {
+        let _ = (&app, &state, server, user, pass, name);
+        return Err(AetherError::Internal("IKEv2-OS is Windows-only for now".into()));
+    }
+    #[cfg(windows)]
+    {
+        if !crate::clients::is_elevated() {
+            return Err(AetherError::Internal("IKEv2 needs admin (Windows VPN store)".into()));
+        }
+        if server.trim().is_empty() || user.is_empty() {
+            return Err(AetherError::Internal("server and username required".into()));
+        }
+        {
+            let mgr = state.manager.lock().unwrap();
+            if !matches!(
+                mgr.state,
+                ConnectionState::Idle | ConnectionState::Error { .. }
+            ) {
+                return Err(AetherError::AlreadyRunning);
+            }
+        }
+        let entry = ikev2_name(&name);
+        let esc = |s: &str| s.replace('\'', "''");
+        ps_run(&format!(
+            "Remove-VpnConnection -Name '{}' -Force -ErrorAction SilentlyContinue",
+            esc(&entry)
+        ))
+        .ok();
+        ps_run(&format!(
+            "Add-VpnConnection -Name '{}' -ServerAddress '{}' -TunnelType Ikev2 -AuthenticationMethod Eap -EncryptionLevel Required -SplitTunneling:$false -RememberCredential",
+            esc(&entry),
+            esc(server.trim())
+        ))
+        .map_err(AetherError::Internal)?;
+        ps_run(&format!(
+            "rasdial '{}' '{}' '{}'",
+            esc(&entry),
+            esc(&user),
+            esc(&pass.replace('\'', "''"))
+        ))
+        .map_err(AetherError::Internal)?;
+        // Placeholder session: feeds disconnect/shutdown paths; the real
+        // signal is the OS connection state polled below.
+        let mut holder =
+            std::process::Command::new("powershell");
+        crate::cmd::silent(&mut holder);
+        holder.args(["-NoProfile", "-NonInteractive", "-Command", "while ($true) { Start-Sleep 60 }"]);
+        let session = ChildSession::spawn(holder).map_err(|e| AetherError::Internal(e.to_string()))?;
+        {
+            let mut mgr = state.manager.lock().unwrap();
+            mgr.session = Some(Session::Child(session));
+            mgr.state = ConnectionState::Launching;
+        }
+        let _ = app.emit(
+            crate::events::STATUS_EVENT,
+            &ConnectionState::Launching,
+        );
+        *IKEV2_ENTRY.lock().unwrap() = Some(entry.clone());
+        let manager = state.manager.clone();
+        std::thread::spawn(move || {
+            // Grace period: rasdial returns before the tunnel is queryable.
+            std::thread::sleep(std::time::Duration::from_secs(8));
+            // Connected once the OS reports it (no SOCKS to probe).
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            loop {
+                std::thread::sleep(Duration::from_millis(2000));
+                let mgr = manager.lock().unwrap();
+                if mgr.user_requested_stop {
+                    return;
+                }
+                let up = ps_run(&format!(
+                    "(Get-VpnConnection -Name '{}' -ErrorAction SilentlyContinue).ConnectionStatus",
+                    esc(&entry)
+                ))
+                .map(|s| s.eq_ignore_ascii_case("connected"))
+                .unwrap_or(false);
+                if up {
+                    drop(mgr);
+                    crate::aether::set_state_and_emit(
+                        &app,
+                        &manager,
+                        ConnectionState::Connected {
+                            socks_addr: "system-vpn".to_string(),
+                            connected_at_ms: crate::events::now_millis(),
+                        },
+                    );
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    drop(mgr);
+                    ikev2_down_inner(&entry);
+                    crate::aether::set_state_and_emit(
+                        &app,
+                        &manager,
+                        ConnectionState::Error {
+                            message: "IKEv2 did not come up".to_string(),
+                            phase: "connecting".to_string(),
+                        },
+                    );
+                    return;
+                }
+            }
+            // Watchdog: surface drops.
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                let mgr = manager.lock().unwrap();
+                if mgr.user_requested_stop {
+                    return;
+                }
+                let up = ps_run(&format!(
+                    "(Get-VpnConnection -Name '{}' -ErrorAction SilentlyContinue).ConnectionStatus",
+                    esc(&entry)
+                ))
+                .map(|s| s.eq_ignore_ascii_case("connected"))
+                .unwrap_or(false);
+                if !up {
+                    drop(mgr);
+                    crate::aether::set_state_and_emit(
+                        &app,
+                        &manager,
+                        ConnectionState::Error {
+                            message: "IKEv2 dropped".to_string(),
+                            phase: "connected".to_string(),
+                        },
+                    );
+                    return;
+                }
+            }
+        });
+        return Ok(());
+    }
+}
+
+fn ikev2_down_inner(entry: &str) {
+    let esc = |s: &str| s.replace('\'', "''");
+    ps_run(&format!("rasdial '{}' /disconnect", esc(entry))).ok();
+    ps_run(&format!(
+        "Remove-VpnConnection -Name '{}' -Force -ErrorAction SilentlyContinue",
+        esc(entry)
+    ))
+    .ok();
+    *IKEV2_ENTRY.lock().unwrap() = None;
+}
+
+/// Tear down an IKEv2 entry if one is up (app exit, disconnect BEFORE the
+/// placeholder session dies — the OS tunnel outlives our process kill).
+pub(crate) fn teardown_ikev2_if_active() {
+    if let Some(entry) = IKEV2_ENTRY.lock().unwrap().clone() {
+        ikev2_down_inner(&entry);
+    }
+}
+
+#[tauri::command]
+pub fn manual_ikev2_down() {
+    teardown_ikev2_if_active();
 }
 
 #[cfg(test)]

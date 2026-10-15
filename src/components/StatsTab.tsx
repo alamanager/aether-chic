@@ -1,10 +1,66 @@
 import { memo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, ShieldCheck } from "lucide-react";
+import { ChevronDown, Gauge, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SpeedCard } from "@/components/SpeedCard";
 import { TransferGraph } from "@/components/TransferGraph";
 import { fmtBytes, fmtClock, fmtDur, useClientUsage, type UserRow } from "@/state/clientUsage";
+import { useConnectionStore } from "@/state/connectionStore";
+
+/** Through-tunnel speed test (8MB down + 2MB up through the live SOCKS). */
+function SpeedTestRow() {
+  const status = useConnectionStore((s) => s.status);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<{ down_mbps: number; up_mbps: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const socks = status.state === "Connected" ? status.socks_addr : null;
+  const usable = socks !== null && socks !== "system-vpn";
+
+  const run = async () => {
+    if (!usable || !socks) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await invoke<{ down_mbps: number; up_mbps: number }>("speed_test", { socks });
+      setRes(r);
+    } catch (e) {
+      setErr(String(e).slice(0, 120));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-xl bg-black/25 px-3 py-2 ring-1 ring-white/10 light:bg-black/[0.04] light:ring-black/10">
+      <div className="flex h-6 items-center justify-between">
+        <span className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.2em] text-muted-foreground uppercase">
+          <Gauge className="size-3.5" />
+          Speed test
+        </span>
+        <button
+          type="button"
+          onClick={() => void run()}
+          disabled={busy || !usable}
+          title={usable ? "Download 8MB + upload 2MB through the tunnel" : "Connect first (not IKEv2)"}
+          className="rounded-lg bg-surface-3 px-2 py-1 text-[11px] font-bold text-foreground transition-colors hover:bg-surface-4 disabled:opacity-50"
+        >
+          {busy ? "Measuring…" : "Run"}
+        </button>
+      </div>
+      {res && (
+        <p className="px-1 font-mono text-[11px] text-foreground" dir="ltr">
+          ↓{res.down_mbps.toFixed(1)} Mbps · ↑{res.up_mbps.toFixed(1)} Mbps
+        </p>
+      )}
+      {err && <p className="px-1 text-[11px] text-muted-foreground">{err}</p>}
+      {!res && !err && (
+        <p className="px-1 text-[11px] text-muted-foreground">
+          Real throughput through the live tunnel — takes ~20s.
+        </p>
+      )}
+    </div>
+  );
+}
 
 const UserDetail = memo(function UserDetail({ row }: { row: UserRow }) {
   return (
@@ -71,6 +127,7 @@ export function StatsTab() {
     <div className="flex w-full flex-col items-center gap-3">
       <SpeedCard />
       <TransferGraph />
+      <SpeedTestRow />
       <div className="glass flex w-full max-w-sm flex-col gap-1.5 rounded-2xl p-3">
         <div className="flex h-6 items-center justify-between px-1">
           <span className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground uppercase">

@@ -143,6 +143,11 @@ pub fn proxy_clients(app: AppHandle, state: tauri::State<crate::state::AppState>
         state.manager.lock().unwrap().session,
         Some(crate::aether::Session::Child(_))
     );
+    // IKEv2 has no SOCKS endpoints at all (system tunnel): report empty
+    // rather than the auto profile's stale ports.
+    if crate::manual::ikev2_active() {
+        return vec![];
+    }
     if manual {
         let watched = vec![
             ("Manual".to_string(), crate::manual::MANUAL_SOCKS_PORT),
