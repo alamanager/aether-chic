@@ -7,6 +7,7 @@ mod commands;
 mod error;
 mod events;
 mod focus;
+mod manual;
 mod matrix;
 mod state;
 mod sysproxy;

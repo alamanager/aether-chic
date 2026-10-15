@@ -21,14 +21,20 @@ jobs:
             os: ubuntu-22.04
             target: ""
             aether_asset: ""
+            sidecar_singbox: ""
+            sidecar_xray: ""
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
             aether_asset: ""
+            sidecar_singbox: ""
+            sidecar_xray: ""
           - name: macos-x86_64
             os: macos-latest
             target: x86_64-apple-darwin
             aether_asset: aether-macos-x86_64.tar.gz
+            sidecar_singbox: sing-box-1.14.3-darwin-amd64.tar.gz
+            sidecar_xray: Xray-macos-64.zip
           - name: windows-x86_64
             os: windows-latest
             target: ""
@@ -58,6 +64,13 @@ jobs:
           AETHER_ASSET: ${{ matrix.aether_asset }}
         run: bash src-tauri/binaries/fetch-aether.sh
 
+      - name: Fetch sidecars (Linux/macOS)
+        if: runner.os != 'Windows'
+        env:
+          SINGBOX_ASSET: ${{ matrix.sidecar_singbox }}
+          XRAY_ASSET: ${{ matrix.sidecar_xray }}
+        run: bash src-tauri/binaries/fetch-sidecars.sh
+
       # fetch-aether.sh is unix-only (tar.gz assets); the Windows asset is a
       # zip, fetched here with the same version pin and checksum verification.
       - name: Fetch Aether core (Windows)
@@ -75,6 +88,18 @@ jobs:
           Move-Item aether-extract/aether.exe src-tauri/binaries/aether.exe
           # v2.x ships Tor/Psiphon transports in pt/ beside the binary.
           if (Test-Path aether-extract/pt) { Move-Item aether-extract/pt src-tauri/binaries/pt }
+
+      - name: Fetch sidecars (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          curl.exe -sL -o sb.zip "https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-windows-amd64.zip"
+          curl.exe -sL -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-windows-64.zip"
+          Expand-Archive sb.zip -DestinationPath sb-extract
+          Expand-Archive xray.zip -DestinationPath xray-extract
+          Move-Item (Get-ChildItem -Recurse -Filter sing-box.exe sb-extract | Select-Object -First 1).FullName src-tauri/binaries/sing-box.exe
+          Move-Item xray-extract/xray.exe src-tauri/binaries/xray.exe
+          foreach ($geo in @("geoip.dat", "geosite.dat")) { if (Test-Path "xray-extract/$geo") { Move-Item "xray-extract/$geo" "src-tauri/binaries/$geo" } }
 
       - run: npm ci
 

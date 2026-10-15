@@ -10,15 +10,16 @@ use crate::state::ConnectionState;
 use profiles::{ConnectionProfile, ExtraTransport};
 use pty::PtySession;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub struct AetherManager {
-    session: Option<PtySession>,
+    session: Option<Session>,
     state: ConnectionState,
-    user_requested_stop: bool,
+    pub(crate) user_requested_stop: bool,
     /// Consecutive auto-retry attempts for the current connection lineage.
     /// Reset to 0 on a fresh user-initiated connect, on reaching Connected
     /// (a proven-working connection earns a full retry budget for whatever
@@ -38,6 +39,108 @@ impl AetherManager {
 
     pub fn status(&self) -> ConnectionState {
         self.state.clone()
+    }
+}
+
+/// A running engine behind the manager: either the Aether core on a PTY
+/// (interactive prompts, readiness markers) or a sidecar binary as a plain
+/// child (manual configs — fully preconfigured, nothing to answer).
+/// Child answers every PTY-only question with the safe default so all
+/// shared paths (monitor, disconnect, shutdown) work unchanged.
+pub enum Session {
+    Pty(PtySession),
+    Child(ChildSession),
+}
+
+pub struct ChildSession {
+    child: Child,
+}
+
+impl ChildSession {
+    pub fn spawn(mut cmd: std::process::Command) -> std::io::Result<Self> {
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        Ok(Self { child: cmd.spawn()? })
+    }
+
+    pub fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
+        self.child.stdout.take()
+    }
+
+    pub fn take_stderr(&mut self) -> Option<std::process::ChildStderr> {
+        self.child.stderr.take()
+    }
+}
+
+impl Session {
+    pub fn try_wait(&mut self) -> Option<String> {
+        match self {
+            Session::Pty(s) => s.try_wait().map(|e| e.to_string()),
+            Session::Child(s) => s
+                .child
+                .try_wait()
+                .ok()
+                .flatten()
+                .map(|e| match e.code() {
+                    Some(c) => format!("exit code {c}"),
+                    None => "terminated by signal".to_string(),
+                }),
+        }
+    }
+
+    pub fn kill(&mut self) {
+        match self {
+            Session::Pty(s) => s.kill(),
+            Session::Child(s) => {
+                let _ = s.child.kill();
+            }
+        }
+    }
+
+    pub fn prompts_done(&self) -> bool {
+        match self {
+            Session::Pty(s) => s.prompts_done(),
+            Session::Child(_) => true,
+        }
+    }
+
+    pub fn overlay_ready(&self) -> bool {
+        match self {
+            Session::Pty(s) => s.overlay_ready(),
+            Session::Child(_) => true,
+        }
+    }
+
+    pub fn engine_started(&self) -> bool {
+        match self {
+            Session::Pty(s) => s.engine_started(),
+            Session::Child(_) => true,
+        }
+    }
+
+    pub fn send_ctrl_c(&self) {
+        match self {
+            Session::Pty(s) => s.send_ctrl_c(),
+            // A plain child has no terminal: the kill that always follows
+            // in every caller is the actual stop signal.
+            Session::Child(_) => {}
+        }
+    }
+
+    pub fn send_access_code(&self, code: &str) -> Result<(), AetherError> {
+        match self {
+            Session::Pty(s) => s.send_access_code(code),
+            // Manual sidecars never prompt (full config up front).
+            Session::Child(_) => Err(AetherError::NotConnected),
+        }
+    }
+
+    pub fn pid(&self) -> u32 {
+        match self {
+            Session::Pty(s) => s.pid(),
+            Session::Child(s) => s.child.id(),
+        }
     }
 }
 
@@ -71,7 +174,7 @@ fn resolve_binary(app: &AppHandle) -> Result<PathBuf, AetherError> {
     Ok(path)
 }
 
-fn set_state_and_emit(
+pub(crate) fn set_state_and_emit(
     app: &AppHandle,
     manager: &Arc<Mutex<AetherManager>>,
     new_state: ConnectionState,
@@ -179,7 +282,7 @@ fn spawn_and_monitor(
 
     {
         let mut mgr = manager.lock().unwrap();
-        mgr.session = Some(session);
+        mgr.session = Some(Session::Pty(session));
         mgr.user_requested_stop = false;
     }
 
