@@ -351,7 +351,8 @@ fn parse_vmess(raw: &str) -> Result<ParsedLink, LinkError> {
         "ws" => {
             let mut m = serde_json::Map::new();
             m.insert("type".into(), json!("ws"));
-            m.insert("path".into(), json!(if g("path").is_empty() { "/" } else { g("path").as_str() }));
+            let path = g("path");
+            m.insert("path".into(), json!(if path.is_empty() { "/" } else { path.as_str() }));
             if !g("host").is_empty() {
                 m.insert("headers".into(), json!({"Host": g("host")}));
             }
@@ -364,7 +365,8 @@ fn parse_vmess(raw: &str) -> Result<ParsedLink, LinkError> {
             let mut m = serde_json::Map::new();
             m.insert("type".into(), json!("http"));
             m.insert("host".into(), json!(if g("host").is_empty() { vec![host.clone()] } else { vec![g("host")] }));
-            m.insert("path".into(), json!(if g("path").is_empty() { "/" } else { g("path").as_str() }));
+            let path = g("path");
+            m.insert("path".into(), json!(if path.is_empty() { "/" } else { path.as_str() }));
             ob.insert("transport".into(), Value::Object(m));
         }
         _ => {}

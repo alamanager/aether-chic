@@ -23,10 +23,11 @@ rm -rf sidecar-tmp && mkdir sidecar-tmp && cd sidecar-tmp
 # -f: fail on HTTP errors so a 404 page never poses as a binary.
 curl -sSLf -o sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/$SB"
 curl -sSLf -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/$XR"
-# Xray publishes .dgst sidecars: verify when present.
+# Xray publishes .dgst sidecars: verify when present (python3 exists on
+# every runner; sha256sum does not exist on macOS).
 curl -sSLf -o xray.dgst "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/$XR.dgst"
 want="$(grep -Eo '[0-9a-fA-F]{64}' xray.dgst | head -1)"
-got="$(sha256sum xray.zip | awk '{print $1}')"
+got="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open("xray.zip","rb").read()).hexdigest())')"
 if [ "$want" != "$got" ]; then
   echo "Checksum verification failed for $XR" >&2
   exit 1
