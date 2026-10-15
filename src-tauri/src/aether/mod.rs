@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub struct AetherManager {
-    session: Option<Session>,
-    state: ConnectionState,
+    pub(crate) session: Option<Session>,
+    pub(crate) state: ConnectionState,
     pub(crate) user_requested_stop: bool,
     /// Consecutive auto-retry attempts for the current connection lineage.
     /// Reset to 0 on a fresh user-initiated connect, on reaching Connected

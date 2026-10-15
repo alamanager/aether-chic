@@ -125,7 +125,7 @@ pub fn start_manual(
         let mut mgr = manager.lock().unwrap();
         mgr.session = Some(Session::Child(session));
     }
-    for (stream, tag) in [(stdout, "out"), (stderr, "err")] {
+    for (stream, tag) in [(stdout.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>), "out"), (stderr.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>), "err")] {
         if let Some(stream) = stream {
             let app = app.clone();
             std::thread::spawn(move || {
