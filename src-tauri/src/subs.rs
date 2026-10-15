@@ -193,6 +193,22 @@ fn parse_clash(yaml: &str) -> Vec<ImportItem> {
         .collect()
 }
 
+/// Percent-encode a userinfo/fragment component when synthesizing links
+/// (passwords routinely contain @ : # ? / that would otherwise split the
+/// URL in the wrong place). Unreserved + a few safe marks pass through.
+fn enc(s: &str) -> String {
+    const UNRESERVED: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if UNRESERVED.contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 fn clash_to_link(p: &serde_yaml::Value) -> Option<String> {
     let g = |k: &str| p.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let server = g("server");
@@ -206,7 +222,12 @@ fn clash_to_link(p: &serde_yaml::Value) -> Option<String> {
     let fp = g("client-fingerprint");
     let net = g("network");
     match g("type").as_str() {
-        "ss" => Some(format!("ss://{cipher}:{}@{server}:{port}", g("password"))),
+        "ss" => {
+            use base64::Engine as _;
+            let cred = base64::engine::general_purpose::STANDARD
+                .encode(format!("{cipher}:{}", g("password")));
+            Some(format!("ss://{cred}@{server}:{port}"))
+        }
         "vmess" => {
             use base64::Engine as _;
             let obj = serde_json::json!({
@@ -222,8 +243,8 @@ fn clash_to_link(p: &serde_yaml::Value) -> Option<String> {
         }
         "trojan" => Some(format!(
             "trojan://{}@{server}:{port}?sni={sni}&fp={fp}#{}",
-            g("password"),
-            g("name")
+            enc(&g("password")),
+            enc(&g("name"))
         )),
         "vless" => {
             let reality = p.get("reality-opts").is_some();
@@ -265,41 +286,41 @@ fn clash_to_link(p: &serde_yaml::Value) -> Option<String> {
             if !g("flow").is_empty() {
                 q += &format!("&flow={}", g("flow"));
             }
-            Some(format!("vless://{}@{server}:{port}?{q}#{}", g("uuid"), g("name")))
+            Some(format!("vless://{}@{server}:{port}?{q}#{}", enc(&g("uuid")), enc(&g("name"))))
         }
         "hysteria2" => Some(format!(
             "hy2://{}@{server}:{port}?sni={sni}{}#{}",
-            g("password"),
+            enc(&g("password")),
             if g("skip-cert-verify").eq_ignore_ascii_case("true") {
                 "&insecure=1"
             } else {
                 ""
             },
-            g("name")
+            enc(&g("name"))
         )),
         "wireguard" => Some(format!(
             "wireguard://{}@{server}:{port}?publickey={}&allowedips=0.0.0.0%2F0#{}",
-            g("private-key"),
-            g("public-key"),
-            g("name")
+            enc(&g("private-key")),
+            enc(&g("public-key")),
+            enc(&g("name"))
         )),
         "tuic" => Some(format!(
             "tuic://{}:{}@{server}:{port}?sni={sni}#{}",
-            g("uuid"),
-            g("password"),
-            g("name")
+            enc(&g("uuid")),
+            enc(&g("password")),
+            enc(&g("name"))
         )),
         "socks5" => Some(format!(
             "socks5://{}:{}@{server}:{port}#{}",
-            g("username"),
-            g("password"),
-            g("name")
+            enc(&g("username")),
+            enc(&g("password")),
+            enc(&g("name"))
         )),
         "http" => Some(format!(
             "http://{}:{}@{server}:{port}#{}",
-            g("username"),
-            g("password"),
-            g("name")
+            enc(&g("username")),
+            enc(&g("password")),
+            enc(&g("name"))
         )),
         _ => None,
     }
@@ -405,5 +426,24 @@ mod tests {
     fn ovpn_auth_user_pass_refused() {
         let e = parse_ovpn("client\nremote vpn.example.com 1194\nauth-user-pass\n").unwrap_err();
         assert!(matches!(e, LinkError::Unsupported(_)));
+    }
+}
+
+#[cfg(test)]
+mod enc_tests {
+    use super::*;
+
+    #[test]
+    fn nasty_passwords_survive_clash_roundtrip() {
+        let yml = "proxies:\n  - {name: N, type: trojan, server: 1.2.3.4, port: 443, password: \"p@ss:w?r#d/a+b\"}";
+        let items = parse_subscription_body(yml);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            ImportItem::Link(p) => {
+                let pw = p.outbound.get("password").and_then(|v| v.as_str()).unwrap();
+                assert_eq!(pw, "p@ss:w?r#d/a+b");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }
