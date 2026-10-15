@@ -50,7 +50,8 @@ pub fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("base64: {e}"))
 }
 
-/// Minimal %XX decoder (no extra crate for one job).
+/// Minimal %XX decoder (NOT form-decoding: a literal '+' stays '+',
+// otherwise passwords get corrupted).
 fn pct_decode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut it = s.as_bytes().iter().peekable();
@@ -61,7 +62,9 @@ fn pct_decode(s: &str) -> String {
             let hex = |c: u8| (c as char).to_digit(16).unwrap_or(0) as u8;
             out.push((hex(hi) * 16 + hex(lo)) as char);
         } else if b == b'+' {
-            out.push(' ');
+            // Literal plus: NOT a space (form-encoding only). Passwords
+            // routinely contain '+' typed as-is.
+            out.push('+');
         } else {
             out.push(b as char);
         }
@@ -264,7 +267,7 @@ fn xray_reality(name: &str, uuid: &str, host: &str, port: u16, q: &HashMap<Strin
         }
         "xhttp" => {
             // Best-effort shape for Xray 25+: wrong keys fail loudly in the
-            // log, never silently — see docs before relying on xhttp links.
+            // log, never silently ï¿½ see docs before relying on xhttp links.
             let mut m = serde_json::Map::new();
             m.insert("mode".into(), json!("auto"));
             m.insert("path".into(), json!(q.get("path").map(|s| s.as_str()).unwrap_or("/")));
@@ -304,8 +307,13 @@ fn name_or(name: &str, host: &str) -> String {
 
 fn parse_vmess(raw: &str) -> Result<ParsedLink, LinkError> {
     let (main, _) = split_name(raw);
-    let body = main.trim_start_matches(|c| c == "v" || c == "V").trim_start_matches("mess://");
-    let body = if body.starts_with("://") { &body[3..] } else { body };
+    // Strip exactly one scheme prefix (case-insensitive) â€” never chew
+    // into the base64 body, which may itself start with v/V.
+    let body = if main.to_lowercase().starts_with("vmess://") {
+        main.get("vmess://".len()..).unwrap_or("")
+    } else {
+        main.as_str()
+    };
     let decoded = b64_decode(body)?;
     let v: Value =
         serde_json::from_slice(&decoded).map_err(|e| LinkError::Malformed(format!("vmess json: {e}")))?;
@@ -410,7 +418,11 @@ fn parse_ss(raw: &str) -> Result<ParsedLink, LinkError> {
         let cred = b64_decode(&after[..at]).map_err(|e| LinkError::Malformed(format!("ss cred: {e}")))?;
         let cred = String::from_utf8(cred).map_err(|_| LinkError::Malformed("ss cred utf8".into()))?;
         let (m, p) = cred.split_once(':').ok_or_else(|| LinkError::Malformed("ss method:password".into()))?;
-        (m.to_string(), p.to_string(), after[at + 1..].to_string(), String::new())
+        let (hp, qq) = match after[at + 1..].find('?') {
+            Some(i) => (after[at + 1..at + 1 + i].to_string(), after[at + 1 + i + 1..].to_string()),
+            None => (after[at + 1..].to_string(), String::new()),
+        };
+        (m.to_string(), p.to_string(), hp, qq)
     } else {
         let decoded = b64_decode(&after).map_err(|e| LinkError::Malformed(format!("ss blob: {e}")))?;
         let s = String::from_utf8(decoded).map_err(|_| LinkError::Malformed("ss blob utf8".into()))?;
@@ -726,5 +738,36 @@ mod tests {
         assert_eq!(cfg["experimental"]["clash_api"]["external_controller"], json!("127.0.0.1:1872"));
         let x = xray_config(&p.outbound);
         assert_eq!(x["inbounds"][1]["port"], json!(1871));
+    }
+}
+
+#[cfg(test)]
+mod fix_tests {
+    use super::*;
+
+    #[test]
+    fn plus_in_password_survives() {
+        let p = parse_link("trojan://a+b@example.com:443#T").unwrap();
+        assert_eq!(p.outbound["password"], serde_json::json!("a+b"));
+        let q = parse_link("trojan://a%2Bb@example.com:443#T").unwrap();
+        assert_eq!(q.outbound["password"], serde_json::json!("a+b"));
+    }
+
+    #[test]
+    fn vmess_scheme_case_and_padding() {
+        use base64::Engine as _;
+        let j = serde_json::json!({"v":"2","ps":"X","add":"example.com","port":"443","id":"11111111-2222-4333-8444-555555555555","aid":"0","scy":"auto","net":"tcp","type":"none","host":"","path":"","tls":"","sni":"","alpn":"","fp":""});
+        let full = base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&j).unwrap());
+        let no_pad = full.trim_end_matches('=');
+        for link in [format!("vmess://{full}"), format!("VMESS://{no_pad}")] {
+            let p = parse_link(&link).unwrap();
+            assert_eq!(p.name, "X");
+        }
+    }
+
+    #[test]
+    fn ss_sip002_plugin_refused_cleanly() {
+        let e = parse_link("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@example.com:8388/?plugin=obfs-local%3Bobfs%3Dhttp#S").unwrap_err();
+        assert!(matches!(e, LinkError::Unsupported(_)));
     }
 }

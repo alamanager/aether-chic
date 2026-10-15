@@ -151,7 +151,11 @@ fn monitor_manual(
     manager: Arc<Mutex<crate::aether::AetherManager>>,
     socks_addr: std::net::SocketAddr,
 ) {
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || {
+        // Backstop: a misconfigured sidecar that never opens its port
+        // must fail loudly, not sit in Launching forever.
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
         std::thread::sleep(Duration::from_millis(400));
         let mut mgr = manager.lock().unwrap();
         if mgr.user_requested_stop {
@@ -183,6 +187,20 @@ fn monitor_manual(
             );
             monitor_manual_connected(app, manager, socks_addr);
             return;
+        }
+        if std::time::Instant::now() >= deadline {
+            mgr.session = None;
+            drop(mgr);
+            set_state_and_emit(
+                &app,
+                &manager,
+                ConnectionState::Error {
+                    message: "Sidecar did not open its port (bad config?)".to_string(),
+                    phase: "connecting".to_string(),
+                },
+            );
+            return;
+        }
         }
     });
 }
