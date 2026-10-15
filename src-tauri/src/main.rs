@@ -60,6 +60,11 @@ fn main() {
             clients::clients_diag,
             clients::is_elevated,
             clients::request_admin,
+            manual::manual_import_text,
+            manual::manual_import_sub,
+            manual::manual_import_ovpn,
+            manual::manual_connect,
+            manual::tcp_ping,
             matrix::matrix_start,
             matrix::matrix_cancel,
         ])

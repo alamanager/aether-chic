@@ -97,10 +97,104 @@ interface ConnectionState {
   setRouteSniff: (route_sniff: boolean) => void;
   clearLogs: () => void;
   retryAfterSidecarError: () => void;
+  /** Manual (sidecar) mode: user configs instead of the WARP scan. */
+  manualMode: boolean;
+  setManualMode: (on: boolean) => void;
+  configs: ManualConfig[];
+  activeConfigId: string | null;
+  addConfigs: (items: ManualConfig[]) => void;
+  removeConfig: (id: string) => void;
+  setActiveConfig: (id: string | null) => void;
+  setConfigLatency: (id: string, ms: number | null) => void;
 }
 
-export const useConnectionStore = create<ConnectionState>((set, get) => ({
+export interface ManualConfig {
+  id: string;
+  name: string;
+  engine: "singbox" | "xray";
+  /** Engine outbound object (sing-box `type` / xray `protocol` shape). */
+  outbound?: unknown;
+  /** Pasted full runtime config (used verbatim). */
+  rawJson?: unknown;
+  socksPort: number;
+  host: string;
+  port: number;
+  source: string;
+  latencyMs?: number | null;
+}
+
+const MANUAL_KEY = "aether-manual-v1";
+
+function loadManual(): { manualMode: boolean; configs: ManualConfig[]; activeConfigId: string | null } {
+  try {
+    const raw = localStorage.getItem(MANUAL_KEY);
+    if (!raw) return { manualMode: false, configs: [], activeConfigId: null };
+    const v = JSON.parse(raw) as Partial<{
+      manualMode: boolean;
+      configs: ManualConfig[];
+      activeConfigId: string | null;
+    }>;
+    return {
+      manualMode: v.manualMode === true,
+      configs: Array.isArray(v.configs) ? v.configs : [],
+      activeConfigId: v.activeConfigId ?? null,
+    };
+  } catch {
+    return { manualMode: false, configs: [], activeConfigId: null };
+  }
+}
+
+/** Runtime config wrapping one outbound (mirrors links::singbox_config). */
+export function buildSingboxRuntime(outbound: unknown): string {
+  const proxy = (
+    typeof outbound === "object" && outbound !== null ? { ...(outbound as Record<string, unknown>) } : {}
+  ) as Record<string, unknown>;
+  proxy.tag = "proxy";
+  return JSON.stringify({
+    log: { level: "info" },
+    inbounds: [
+      { type: "mixed", tag: "in", listen: "127.0.0.1", listen_port: 1870, sniff: true },
+    ],
+    outbounds: [proxy, { type: "direct", tag: "direct" }],
+    route: { final: "proxy", auto_detect_interface: true },
+    experimental: { clash_api: { external_controller: "127.0.0.1:1872" } },
+  });
+}
+
+/** Runtime config wrapping one outbound (mirrors links::xray_config). */
+export function buildXrayRuntime(outbound: unknown): string {
+  const proxy = (
+    typeof outbound === "object" && outbound !== null ? { ...(outbound as Record<string, unknown>) } : {}
+  ) as Record<string, unknown>;
+  proxy.tag = "proxy";
+  return JSON.stringify({
+    log: { loglevel: "warning" },
+    inbounds: [
+      { protocol: "socks", listen: "127.0.0.1", port: 1870, settings: { udp: true } },
+      { protocol: "http", listen: "127.0.0.1", port: 1871 },
+    ],
+    outbounds: [proxy, { protocol: "freedom" }],
+  });
+}
+
+export const useConnectionStore = create<ConnectionState>((set, get) => {
+  const savedManual = loadManual();
+  const persistManual = () => {
+    try {
+      const s = get();
+      localStorage.setItem(
+        MANUAL_KEY,
+        JSON.stringify({ manualMode: s.manualMode, configs: s.configs, activeConfigId: s.activeConfigId }),
+      );
+    } catch {
+      /* private mode */
+    }
+  };
+  return {
   status: { state: "Idle" },
+  manualMode: savedManual.manualMode,
+  configs: savedManual.configs,
+  activeConfigId: savedManual.activeConfigId,
   profile: {
     protocol: "auto",
     scan_mode: "balanced",
@@ -174,6 +268,31 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     // A fresh user-initiated attempt should not inherit stale log-driven UI
     // prompts (notably a previous Zero Trust email-code request).
     set((s) => ({ logs: [], scanBudgetSecs: null, torPercent: null, traffic: null, samples: [], attemptId: s.attemptId + 1 }));
+    if (get().manualMode) {
+      const s = get();
+      const cfg = s.configs.find((c) => c.id === s.activeConfigId);
+      if (!cfg) {
+        set({ status: { state: "Error", message: "Pick a config in Tune → Manual first.", phase: "launching" } });
+        return;
+      }
+      try {
+        const configJson =
+          cfg.rawJson !== undefined && cfg.rawJson !== null
+            ? JSON.stringify(cfg.rawJson)
+            : cfg.engine === "xray"
+              ? buildXrayRuntime(cfg.outbound)
+              : buildSingboxRuntime(cfg.outbound);
+        await invoke("manual_connect", { engine: cfg.engine, configJson });
+      } catch (e) {
+        const message = String(e);
+        if (message.toLowerCase().includes("binary not found")) {
+          set({ sidecarError: message });
+        } else {
+          set({ status: { state: "Error", message, phase: "launching" } });
+        }
+      }
+      return;
+    }
     try {
       await invoke("connect", { profileOverride: get().profile });
     } catch (e) {
@@ -336,7 +455,44 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   // after fixing a broken install) — the next connect() call will re-set
   // sidecarError if the binary is still missing.
   retryAfterSidecarError: () => set({ sidecarError: null }),
-}));
+
+  setManualMode: (on) => {
+    set({ manualMode: on });
+    persistManual();
+  },
+
+  addConfigs: (items) => {
+    set((s) => {
+      const ids = new Set(s.configs.map((c) => c.id));
+      const fresh = items.filter((c) => !ids.has(c.id));
+      const configs = [...s.configs, ...fresh];
+      const activeConfigId = s.activeConfigId ?? fresh[0]?.id ?? null;
+      return { configs, activeConfigId };
+    });
+    persistManual();
+  },
+
+  removeConfig: (id) => {
+    set((s) => ({
+      configs: s.configs.filter((c) => c.id !== id),
+      activeConfigId: s.activeConfigId === id ? null : s.activeConfigId,
+    }));
+    persistManual();
+  },
+
+  setActiveConfig: (id) => {
+    set({ activeConfigId: id });
+    persistManual();
+  },
+
+  setConfigLatency: (id, ms) => {
+    set((s) => ({
+      configs: s.configs.map((c) => (c.id === id ? { ...c, latencyMs: ms } : c)),
+    }));
+    persistManual();
+  },
+  };
+});
 
 // Dev-only: lets the 3D backdrop's per-state moods be driven from the WebView2
 // devtools console without a live tunnel, e.g.

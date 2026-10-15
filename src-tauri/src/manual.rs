@@ -247,9 +247,151 @@ fn monitor_manual_connected(
     });
 }
 
+/// Import DTOs for pasted text / files (one string in, items out).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ImportDto {
+    pub kind: String,
+    pub name: String,
+    pub engine: String,
+    pub outbound: Option<serde_json::Value>,
+    pub raw_json: Option<serde_json::Value>,
+    pub socks_port: u16,
+    pub host: String,
+    pub port: u16,
+    pub reason: String,
+}
+
+fn engine_str(e: crate::links::Engine) -> &'static str {
+    match e {
+        crate::links::Engine::SingBox => "singbox",
+        crate::links::Engine::Xray => "xray",
+    }
+}
+
+#[tauri::command]
+pub fn manual_import_text(text: String) -> Vec<ImportDto> {
+    crate::subs::parse_subscription_body(&text)
+        .into_iter()
+        .map(|item| match item {
+            crate::subs::ImportItem::Link(p) => ImportDto {
+                kind: "link".into(),
+                name: p.name.clone(),
+                engine: engine_str(p.engine).into(),
+                outbound: Some(p.outbound.clone()),
+                raw_json: None,
+                socks_port: 1870,
+                host: p.server_host.clone(),
+                port: p.server_port,
+                reason: String::new(),
+            },
+            crate::subs::ImportItem::RawJson { name, engine, json, socks_port } => ImportDto {
+                kind: "rawjson".into(),
+                name,
+                engine: engine_str(engine).into(),
+                outbound: None,
+                raw_json: Some(json),
+                socks_port,
+                host: String::new(),
+                port: 0,
+                reason: String::new(),
+            },
+            crate::subs::ImportItem::Skipped { line, reason } => ImportDto {
+                kind: "skipped".into(),
+                name: line,
+                engine: String::new(),
+                outbound: None,
+                raw_json: None,
+                socks_port: 0,
+                host: String::new(),
+                port: 0,
+                reason,
+            },
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn manual_import_sub(url: String) -> Result<Vec<ImportDto>, String> {
+    let body = crate::subs::fetch_subscription(&url).await?;
+    Ok(manual_import_text(body))
+}
+
+#[tauri::command]
+pub fn manual_import_ovpn(text: String) -> ImportDto {
+    match crate::subs::parse_ovpn(&text) {
+        Ok(p) => ImportDto {
+            kind: "link".into(),
+            name: p.name.clone(),
+            engine: engine_str(p.engine).into(),
+            outbound: Some(p.outbound.clone()),
+            raw_json: None,
+            socks_port: 1870,
+            host: p.server_host.clone(),
+            port: p.server_port,
+            reason: String::new(),
+        },
+        Err(e) => ImportDto {
+            kind: "skipped".into(),
+            name: "ovpn".into(),
+            engine: String::new(),
+            outbound: None,
+            raw_json: None,
+            socks_port: 0,
+            host: String::new(),
+            port: 0,
+            reason: crate::subs::link_error_reason(e),
+        },
+    }
+}
+
+#[tauri::command]
+pub fn manual_connect(
+    app: AppHandle,
+    state: tauri::State<crate::state::AppState>,
+    engine: String,
+    config_json: String,
+) -> Result<(), AetherError> {
+    let kind = match engine.as_str() {
+        "xray" => SidecarKind::Xray,
+        "singbox" => SidecarKind::SingBox,
+        _ => return Err(AetherError::Internal("unknown engine".into())),
+    };
+    if serde_json::from_str::<serde_json::Value>(&config_json).is_err() {
+        return Err(AetherError::Internal("bad config json".into()));
+    }
+    start_manual(app, state.manager.clone(), kind, &config_json)
+}
+
+/// TCP handshake timing for latency badges. Resolves names, tries each
+/// address, returns the fastest in ms. No traffic shaping games — a SYN
+/// that answers is a reachable server.
+#[tauri::command]
+pub fn tcp_ping(host: String, port: u16) -> Result<u64, String> {
+    use std::net::ToSocketAddrs;
+    use std::time::Instant;
+    let addrs: Vec<std::net::SocketAddr> = format!("{host}:{port}")
+        .to_socket_addrs()
+        .map_err(|e| format!("dns: {e}"))?
+        .collect();
+    if addrs.is_empty() {
+        return Err("no address".into());
+    }
+    let mut best: Option<u64> = None;
+    for a in addrs {
+        let t = Instant::now();
+        match std::net::TcpStream::connect_timeout(&a, Duration::from_secs(5)) {
+            Ok(_) => {
+                let ms = u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX);
+                best = Some(best.map_or(ms, |b: u64| b.min(ms)));
+            }
+            Err(_) => continue,
+        }
+    }
+    best.ok_or_else(|| "unreachable".into())
+}
+
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests {    use super::*;
 
     #[test]
     fn sidecar_binaries_per_platform() {
@@ -269,5 +411,19 @@ mod tests {
         let (socks, http) = manual_addrs();
         assert_eq!(socks, "127.0.0.1:1870");
         assert_eq!(http, "127.0.0.1:1871");
+    }
+
+    #[test]
+    fn tcp_ping_localhost() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let ms = tcp_ping("127.0.0.1".into(), port).unwrap();
+        assert!(ms < 5000);
+        drop(listener);
+        // Closed port refuses fast — still an Err, never a hang.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let shut = closed.local_addr().unwrap().port();
+        drop(closed);
+        assert!(tcp_ping("127.0.0.1".into(), shut).is_err());
     }
 }

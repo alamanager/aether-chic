@@ -118,6 +118,10 @@ export function ConnectionInfo() {
     status.state === "Reconnecting" ||
     status.state === "Connected";
   const connected = status.state === "Connected";
+  const manualMode = useConnectionStore((s) => s.manualMode);
+  const configs = useConnectionStore((s) => s.configs);
+  const activeConfigId = useConnectionStore((s) => s.activeConfigId);
+  const activeEngine = configs.find((c) => c.id === activeConfigId)?.engine ?? "singbox";
   const extra = useConnectionStore((s) => s.profile.extra_transport);
   const httpPortField = useConnectionStore((s) => s.profile.http_port);
   const torBind = useConnectionStore((s) => s.profile.tor_bind);
@@ -135,12 +139,14 @@ export function ConnectionInfo() {
     if (h === "" || h === "0.0.0.0" || h === "::") h = "127.0.0.1";
     return `${h}:${m[2]}`;
   };
-  const torExit = isTorChain ? normExit(torBind, "127.0.0.1:1820") : null;
-  const psiExit = isPsiChain ? normExit(psiBind, "127.0.0.1:1821") : null;
+  const torExit = !manualMode && isTorChain ? normExit(torBind, "127.0.0.1:1820") : null;
+  const psiExit = !manualMode && isPsiChain ? normExit(psiBind, "127.0.0.1:1821") : null;
   const socksAddr =
-    status.state === "Connected"
-      ? status.socks_addr
-      : (torExit ?? psiExit ?? fromBind.socks);
+    manualMode && connected
+      ? "127.0.0.1:1870"
+      : status.state === "Connected"
+        ? status.socks_addr
+        : (torExit ?? psiExit ?? fromBind.socks);
   const portOf = (a: string): number | null => {
     const m = /:(\d+)\s*$/.exec(a);
     return m ? Number(m[1]) : null;
@@ -176,7 +182,14 @@ export function ConnectionInfo() {
   for (let i = 0; i < 4 && taken.has(httpPort); i++) {
     httpPort = httpPort >= 65535 ? 1820 : httpPort + 1;
   }
-  const httpAddr = `${hostOf(fromBind.socks)}:${httpPort}`;
+  // Manual sidecars serve fixed loopback ports (sing-box `mixed` does
+  // SOCKS+HTTP on one port; xray splits them). Backend reports the same.
+  const httpAddr =
+    manualMode && connected
+      ? activeEngine === "xray"
+        ? "127.0.0.1:1871"
+        : "127.0.0.1:1870"
+      : `${hostOf(fromBind.socks)}:${httpPort}`;
 
   const fetchIp = useCallback(async () => {
     setIpLoading(true);

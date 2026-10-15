@@ -14,6 +14,7 @@ import { SidecarErrorScreen } from "@/components/SidecarErrorScreen";
 import { AccessCodePrompt } from "@/components/AccessCodePrompt";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TitleBar } from "@/components/TitleBar";
+import { ModeSwitch } from "@/components/ManualSection";
 import { cn } from "@/lib/utils";
 import { initConnectionListeners, useConnectionStore } from "@/state/connectionStore";
 
@@ -44,6 +45,7 @@ function PulseTab() {
         </h1>
         <p className="text-[11px] text-muted-foreground">One tap between you and the open net</p>
       </div>
+      <ModeSwitch />
       <ConnectButton />
       <ConnectionStatusLine />
       <AccessCodePrompt key={attemptId} />

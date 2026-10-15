@@ -15,6 +15,7 @@ import { PsiphonOptions } from "@/components/PsiphonOptions";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
 import { TextOpt, AreaOpt, SwitchRow, SelectOpt } from "@/components/fields";
+import { ManualSection, ModeSwitch } from "@/components/ManualSection";
 import { useConnectionStore as connectionStore } from "@/state/connectionStore";
 import { cn } from "@/lib/utils";
 
@@ -182,6 +183,13 @@ export function SettingsTab() {
           Tunnel is live — disconnect to retune.
         </p>
       )}
+
+      <Section icon={<Zap className="size-4" />} title="Mode & configs" stamp="auto warp · manual links" defaultOpen>
+        <div className="flex justify-center">
+          <ModeSwitch />
+        </div>
+        <ManualSection />
+      </Section>
 
       <Section icon={<Zap className="size-4" />} title="Transport" stamp="protocol · scan · overlay" defaultOpen>
         <FieldRow label="Protocol"

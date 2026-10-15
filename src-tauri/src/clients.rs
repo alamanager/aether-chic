@@ -136,7 +136,40 @@ fn query_table() -> Vec<TcpRow> {
     }
 }
 #[tauri::command]
-pub fn proxy_clients(app: AppHandle) -> Vec<EndpointClients> {
+pub fn proxy_clients(app: AppHandle, state: tauri::State<crate::state::AppState>) -> Vec<EndpointClients> {
+    // Manual sidecar sessions serve fixed loopback ports, not the auto
+    // profile's — detect the session kind, never guess from settings.
+    let manual = matches!(
+        state.manager.lock().unwrap().session,
+        Some(crate::aether::Session::Child(_))
+    );
+    if manual {
+        let watched = vec![
+            ("Manual".to_string(), crate::manual::MANUAL_SOCKS_PORT),
+            ("Manual HTTP".to_string(), crate::manual::MANUAL_HTTP_PORT),
+        ];
+        // sing-box `mixed` serves both on one port: dedup to a single row.
+        let mut watched = watched;
+        watched.sort_by_key(|(_, p)| *p);
+        watched.dedup_by_key(|(_, p)| *p);
+        let rows = query_table();
+        return watched
+            .iter()
+            .map(|(label, port)| {
+                let conns: Vec<ConnSample> = rows
+                    .iter()
+                    .filter(|r| r.local_port == *port)
+                    .map(|r| ConnSample {
+                        conn_id: r.remote_address.clone(),
+                        ip: r.remote_address.clone(),
+                        up: None,
+                        down: None,
+                    })
+                    .collect();
+                group(label, *port, conns, false)
+            })
+            .collect();
+    }
     let profile = crate::aether::profiles::load(&app);
     let socks_port = profile
         .bind_address
