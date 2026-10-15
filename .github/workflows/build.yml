@@ -93,8 +93,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          curl.exe -sL -o sb.zip "https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-windows-amd64.zip"
-          curl.exe -sL -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-windows-64.zip"
+          curl.exe -sSLf -o sb.zip "https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-windows-amd64.zip"
+          curl.exe -sSLf -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-windows-64.zip"
           Expand-Archive sb.zip -DestinationPath sb-extract
           Expand-Archive xray.zip -DestinationPath xray-extract
           Move-Item (Get-ChildItem -Recurse -Filter sing-box.exe sb-extract | Select-Object -First 1).FullName src-tauri/binaries/sing-box.exe

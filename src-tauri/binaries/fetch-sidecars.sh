@@ -10,7 +10,7 @@ DEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64)   SB="sing-box-1.14.3-linux-amd64.tar.gz"; XR="Xray-linux-64.zip" ;;
-  Darwin-arm64)   SB="sing-box-1.14.3-darwin-arm64.tar.gz"; XR="Xray-macos-arm64.zip" ;;
+  Darwin-arm64)   SB="sing-box-1.14.3-darwin-arm64.tar.gz"; XR="Xray-macos-arm64-v8a.zip" ;;
   Darwin-x86_64)  SB="sing-box-1.14.3-darwin-amd64.tar.gz"; XR="Xray-macos-64.zip" ;;
   *) echo "Unsupported platform for sidecars: $(uname -s)-$(uname -m) (Windows handled in CI)" >&2; exit 1 ;;
 esac
@@ -20,8 +20,17 @@ XR="${XRAY_ASSET:-$XR}"
 
 cd "$DEST_DIR"
 rm -rf sidecar-tmp && mkdir sidecar-tmp && cd sidecar-tmp
-curl -sL -o sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/$SB"
-curl -sL -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/$XR"
+# -f: fail on HTTP errors so a 404 page never poses as a binary.
+curl -sSLf -o sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/$SB"
+curl -sSLf -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/$XR"
+# Xray publishes .dgst sidecars: verify when present.
+curl -sSLf -o xray.dgst "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/$XR.dgst"
+want="$(grep -Eo '[0-9a-fA-F]{64}' xray.dgst | head -1)"
+got="$(sha256sum xray.zip | awk '{print $1}')"
+if [ "$want" != "$got" ]; then
+  echo "Checksum verification failed for $XR" >&2
+  exit 1
+fi
 tar xzf sb.tar.gz
 unzip -o -q xray.zip
 SBBIN="$(find . -name 'sing-box' -type f | head -1)"
